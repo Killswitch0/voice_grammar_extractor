@@ -84,6 +84,7 @@ of your English improving (or not) over time.
 | `analysis/memory.md` | The one file that persists — current level, active mistakes with occurrence counts, vocabulary to learn, next 3-5 goals |
 | `analysis/memory_archive.md` | Long-resolved mistakes get moved here so `memory.md` itself stays short and readable |
 | `analysis/scores_history.csv` | Append-only numeric record (CEFR, scores, filler rate) per session — for graphing progress later, separate from the readable text in `memory.md` |
+| `analysis/conversation_focus_log.md` | Owned only by Conversation Practice Mode (the other mode in this same `CLAUDE.md`, triggered by "let's practice" instead of "analyze the recording") — tracks which `memory.md` patterns were drilled in dialogue and when. Recording analysis never reads or writes it — see "Same repo, second mode" below |
 
 ## Why it's built this way
 
@@ -132,3 +133,12 @@ of your English improving (or not) over time.
   read stays short; nothing is lost, just archived.
 - **Progress is cached per file** (Stage 1) — diarization and transcription
   are the slow steps. A crash shouldn't mean starting over.
+- **Same repo, second mode, one-way feed.** This `CLAUDE.md` also has a
+  second mode — Interactive Conversation Practice, triggered by "let's
+  practice" instead of "analyze the recording" — for typed dialogue drills
+  targeted at your actual recurring mistakes instead of random topics. It
+  reads `memory.md` to pick what to drill but never writes to it: mixing
+  typed-conversation practice into the scores tracked here would break the
+  session-to-session comparability rule above. It keeps its own rotation
+  bookkeeping in `analysis/conversation_focus_log.md` instead, and the two
+  modes' rules are never followed at the same time.
