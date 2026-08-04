@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-grammar-extractor"
+version = "1.0.0"
+description = "Extracts your lines from a video/audio file for grammar analysis via AI"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper==1.2.1",
+    "pyannote.audio==4.0.7",
+    "omegaconf==2.3.1",
+    "torch==2.13.0",
+    "torchaudio==2.11.0",
+    "numpy==2.4.6",
+    "python-dotenv>=1.0.1",
+    "pyyaml>=6.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+voice-extractor = "main:main"
+identify-speaker = "identify_speaker:main"
+
+[tool.setuptools]
+py-modules = ["main", "identify_speaker"]
+packages = ["voxlib"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

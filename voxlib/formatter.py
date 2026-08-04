@@ -1,0 +1,125 @@
+"""
+Builds the final text documents from transcribed lines.
+
+Generates:
+  - annotated: with timestamps, source file name, and a marker on low-confidence
+    lines — for your navigation/review
+  - clean:     just the lines themselves, one per line — to feed into an AI
+  - (optionally) parts of the clean document, if it's too large for a single
+    AI prompt
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+
+@dataclass
+class SourcedLine:
+    source_file: str
+    start: float
+    end: float
+    text: str
+    avg_logprob: Optional[float] = None
+
+
+# Whisper's avg_logprob typically ranges from about 0 (maximally confident)
+# down to -1.5 and below (not confident at all). -0.5 works reasonably well in
+# practice to separate questionable recognitions from normal ones.
+DEFAULT_LOW_CONFIDENCE_THRESHOLD = -0.5
+
+
+def _format_timestamp(seconds: float) -> str:
+    total_seconds = int(seconds)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def write_annotated_document(
+    lines: list[SourcedLine],
+    output_path: Path,
+    low_confidence_threshold: float = DEFAULT_LOW_CONFIDENCE_THRESHOLD,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    low_confidence_count = 0
+
+    with output_path.open("w", encoding="utf-8") as f:
+        current_source = None
+        for line in lines:
+            if line.source_file != current_source:
+                current_source = line.source_file
+                f.write(f"\n=== {current_source} ===\n")
+            ts = _format_timestamp(line.start)
+            is_low_confidence = (
+                line.avg_logprob is not None and line.avg_logprob < low_confidence_threshold
+            )
+            marker = " [?]" if is_low_confidence else ""
+            if is_low_confidence:
+                low_confidence_count += 1
+            f.write(f"[{ts}]{marker} {line.text}\n")
+
+    if low_confidence_count:
+        import logging
+        logging.getLogger(__name__).info(
+            "Marked as low-confidence ([?]): %d out of %d lines. "
+            "This is usually unclear diction/background noise in the recording — "
+            "when reviewing grammar, double-check these lines against the original.",
+            low_confidence_count, len(lines),
+        )
+
+
+def write_clean_document(lines: list[SourcedLine], output_path: Path) -> None:
+    """
+    Clean text: one line per line, no timestamps or file names.
+    This is the file you paste as-is into an AI prompt for grammar analysis.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        for line in lines:
+            f.write(f"{line.text}\n")
+
+
+def write_split_documents(lines: list[SourcedLine], output_dir: Path, max_chars: int) -> list[Path]:
+    """
+    Splits the lines into several files part_1.txt, part_2.txt, ... so that
+    each file is no longer than max_chars characters (lines are never split
+    in the middle). Useful when you've accumulated a lot of recordings and the
+    whole transcript_clean.txt doesn't fit into a single AI prompt at once.
+    """
+    parts_dir = output_dir / "parts"
+    parts_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clear old parts from previous runs, so no stale files are left behind
+    # if there are fewer lines this time.
+    for old_file in parts_dir.glob("part_*.txt"):
+        old_file.unlink()
+
+    written_paths: list[Path] = []
+    current_lines: list[str] = []
+    current_len = 0
+    part_number = 1
+
+    def flush() -> None:
+        nonlocal current_lines, current_len, part_number
+        if not current_lines:
+            return
+        part_path = parts_dir / f"part_{part_number}.txt"
+        part_path.write_text("\n".join(current_lines) + "\n", encoding="utf-8")
+        written_paths.append(part_path)
+        part_number += 1
+        current_lines = []
+        current_len = 0
+
+    for line in lines:
+        text = line.text
+        # +1 for the newline
+        if current_len + len(text) + 1 > max_chars and current_lines:
+            flush()
+        current_lines.append(text)
+        current_len += len(text) + 1
+
+    flush()
+    return written_paths

@@ -1,0 +1,15 @@
+# Pinned to exact versions confirmed to work together (verified on a real
+# run — see the note below). Loose ">=" ranges let pip's resolver pick a
+# torch/torchaudio pair that don't match each other, which caused a real
+# "module 'torchaudio' has no attribute 'AudioMetaData'" crash in testing.
+# If you need to bump a version, bump torch and torchaudio together and
+# re-verify diarization + transcription both still work before relying on it.
+faster-whisper==1.2.1
+pyannote.audio==4.0.7
+omegaconf==2.3.1  # not imported directly — needed to unpickle pyannote/embedding's checkpoint (OmegaConf DictConfig), otherwise: ModuleNotFoundError: No module named 'omegaconf'
+torch==2.13.0
+torchaudio==2.11.0
+numpy==2.4.6
+python-dotenv>=1.0.1
+pyyaml>=6.0
+rich>=13.0.0  # our own progress bars / colored logging (voxlib/console.py) — also already pulled in transitively by pyannote's toolchain

@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# If a PR branch is pushed to, both `push` and `pull_request` fire for the
+# same commit — this cancels the older, now-stale run instead of running
+# the suite twice for nothing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Deliberately not `pip install -e .` — the project's base dependencies
+      # include torch/pyannote.audio/faster-whisper (several GB, see the
+      # disk-space note in README.md), which the current test suite doesn't
+      # need at all (see "Running tests" in README.md). Installing just the
+      # light runtime deps the tested modules actually import keeps CI fast.
+      - name: Install test dependencies
+        run: pip install pytest pyyaml numpy rich
+
+      - name: Run tests
+        run: pytest -v

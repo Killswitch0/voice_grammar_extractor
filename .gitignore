@@ -1,0 +1,25 @@
+# Personal data — never commit your own recordings or speech analysis
+recordings/*
+!recordings/README.txt
+voice_reference/*
+!voice_reference/README.txt
+output/
+analysis/sessions/*
+!analysis/sessions/README.txt
+analysis/memory.md
+analysis/memory_archive.md
+analysis/scores_history.csv
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Docker
+.docker/

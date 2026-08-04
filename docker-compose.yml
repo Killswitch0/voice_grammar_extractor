@@ -1,0 +1,33 @@
+# One-command setup and run. See the "Quickstart (Docker)" section in README.md.
+#
+# Usage (from this folder, after creating .env from .env.example):
+#   docker compose run --rm extractor call.webm --reference my_voice.wav
+#   docker compose run --rm identify call.webm -o output
+#
+# The image is built automatically on the first run and reused after that.
+
+services:
+  extractor:
+    build: .
+    image: voice-grammar-extractor
+    entrypoint: ["python", "main.py"]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+
+  identify:
+    build: .
+    image: voice-grammar-extractor
+    entrypoint: ["python", "identify_speaker.py"]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+
+volumes:
+  hf_cache:

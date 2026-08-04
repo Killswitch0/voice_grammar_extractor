@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+output/
+.cache/
+*.wav
+*.mp4
+*.webm
+*.mkv
+.git/
+*.egg-info/
+build/
+dist/
+.env
+recordings/
+analysis/
+voice_reference/

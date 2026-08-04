@@ -1,0 +1,19 @@
+# Example config for voice-grammar-extractor.
+# Run with: python main.py recordings_folder/ --config config.example.yaml
+#
+# Any of these keys can be overridden with a command-line flag —
+# a CLI flag always takes priority over the config value.
+
+reference: my_voice.wav
+output_dir: output
+hf_token: null          # better to set via the HF_TOKEN env var than to store it here
+whisper_model: small
+language: en
+device: cpu
+threshold: 0.75
+no_diarization: false
+split_chars: 15000
+low_confidence_threshold: -0.5
+remove_fillers: false
+batch_size: null      # e.g. 8 — enables batched transcription (useful on GPU)
+log_file: null        # e.g. output/run.log — also write the log to a file

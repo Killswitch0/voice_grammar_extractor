@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""
+Console app: extracts only YOUR lines from a video/audio file (including webm),
+separating them from other voices by comparing against a reference sample of
+your voice, and writes them to a document ready for grammar analysis via AI.
+
+Examples:
+    python main.py call.webm --reference my_voice.wav --hf-token hf_xxx -o out/
+
+    python main.py recordings_folder/ --reference my_voice.wav \\
+        --hf-token hf_xxx --whisper-model medium -o out/
+
+    # If the recording is just you (solo, no diarization):
+    python main.py monologue.mp4 --no-diarization -o out/
+
+    # Using a config file instead of a long list of flags:
+    python main.py recordings_folder/ --config my_config.yaml
+
+    # Check what you'll get first, without running the slow transcription:
+    python main.py call.webm --reference my_voice.wav --dry-run
+
+    # Not sure which reference sample to cut? There's a dedicated helper:
+    python identify_speaker.py call.webm --hf-token hf_xxx -o output/
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from voxlib.console import configure_logging, console  # noqa: E402
+
+
+def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentParser:
+    config_defaults = config_defaults or {}
+
+    parser = argparse.ArgumentParser(
+        prog="voice-grammar-extractor",
+        description="Extracts your lines from a video/audio file for later grammar analysis.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "input",
+        type=Path,
+        help="Path to a video/audio file, or a folder with several files",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to a YAML settings file (see config.example.yaml). "
+             "Command-line flags explicitly passed take priority over the config.",
+    )
+    parser.add_argument(
+        "-r", "--reference",
+        type=Path,
+        default=config_defaults.get("reference"),
+        help="Path to a reference sample of your voice (10-30 sec of clean speech). "
+             "Required unless --no-diarization is set. "
+             "Not sure what to cut — use identify_speaker.py.",
+    )
+    parser.add_argument(
+        "-o", "--output-dir",
+        type=Path,
+        default=config_defaults.get("output_dir", Path("output")),
+        help="Folder for the final documents (default: ./output)",
+    )
+    parser.add_argument(
+        "--hf-token",
+        type=str,
+        default=config_defaults.get("hf_token", os.environ.get("HF_TOKEN")),
+        help="HuggingFace token for the diarization models (or the HF_TOKEN env var)",
+    )
+    parser.add_argument(
+        "--whisper-model",
+        type=str,
+        default=config_defaults.get("whisper_model", "small"),
+        choices=["tiny", "base", "small", "medium", "large-v3"],
+        help="Whisper model size (default: small). Bigger = more accurate but slower.",
+    )
+    parser.add_argument(
+        "--language",
+        type=str,
+        default=config_defaults.get("language", "en"),
+        help="Speech language code for whisper (en, ru, etc.). "
+             "Use 'auto' for auto-detection (useful for mixed-language speech).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=config_defaults.get("device", "cpu"),
+        choices=["cpu", "cuda"],
+        help="Device to run computation on (default: cpu)",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=config_defaults.get("threshold", 0.75),
+        help="Cosine similarity threshold for recognizing your voice (default: 0.75). "
+             "Raise it if the system confuses you with others; lower it if it misses your lines. "
+             "The log after each run includes a hint with a recommended value.",
+    )
+    parser.add_argument(
+        "--no-diarization",
+        action="store_true",
+        default=config_defaults.get("no_diarization", False),
+        help="Disable speaker separation: the whole file is treated as your solo speech.",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Don't use the progress cache — recompute everything from scratch, "
+             "even if saved results already exist for this file.",
+    )
+    parser.add_argument(
+        "--split-chars",
+        type=int,
+        default=config_defaults.get("split_chars"),
+        help="If set, additionally splits transcript_clean.txt into parts no "
+             "longer than the given number of characters (output/parts/part_N.txt) — "
+             "useful when the whole text doesn't fit into a single AI prompt.",
+    )
+    parser.add_argument(
+        "--low-confidence-threshold",
+        type=float,
+        default=config_defaults.get("low_confidence_threshold", -0.5),
+        help="avg_logprob threshold (usually between 0 and -1.5) below which a line "
+             "in the annotated document is marked as low-confidence [?] (default: -0.5).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only run diarization + identification of 'your' segments, no transcription. "
+             "Shows how many speakers were found and what share of the speech is yours, "
+             "before spending time on full processing. Requires diarization (not compatible with --no-diarization).",
+    )
+    parser.add_argument(
+        "--remove-fillers",
+        action="store_true",
+        default=config_defaults.get("remove_fillers", False),
+        help="Remove pure filler sounds (um, uh, erm) from the transcript. "
+             "Meaningful filler words (like, you know, etc.) are left untouched — "
+             "they can't be reliably told apart from real words without risking broken sentences.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=config_defaults.get("batch_size"),
+        help="Enable batched transcription (BatchedInferencePipeline) with the given "
+             "batch size — speeds up processing of long lines, especially on GPU. "
+             "Off by default (uses the regular sequential mode).",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=config_defaults.get("log_file"),
+        help="Path to a file to additionally write the run log to "
+             "(useful for long unattended runs).",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Verbose logging",
+    )
+    return parser
+
+
+def _print_dry_run_result(result: dict) -> None:
+    console.print()
+    console.print("[bold cyan]=== Dry run result (no transcription) ===[/]")
+    for s in result["per_file"]:
+        mins_mine = s["duration_mine_sec"] / 60
+        console.print(
+            f"  {s['file']}: {s['num_speakers']} speakers, "
+            f"your lines {s['num_segments_mine']}/{s['num_segments_total']}, "
+            f"your speech ~{mins_mine:.1f} min ([bold]{s['mine_share_pct']:.0f}%[/])"
+        )
+    console.print()
+    console.print("If the numbers look off — adjust [bold]--threshold[/] and try [bold]--dry-run[/] again.")
+    console.print("Once you're happy with it — drop --dry-run and run the full processing.")
+
+
+def _print_full_result(result: dict) -> None:
+    console.print()
+    console.print("[bold green]Done![/]")
+    console.print(f"  Annotated document: [cyan]{result['annotated']}[/]")
+    console.print(f"  Clean text for AI:  [cyan]{result['clean']}[/]")
+    if "parts" in result:
+        console.print(f"  Parts for AI ({len(result['parts'])}): [cyan]{result['parts'][0].parent}/[/]")
+    stats = result.get("stats", {})
+    if stats:
+        mins = stats["total_duration_sec"] / 60
+        console.print(
+            f"  Stats: {stats['total_lines']} lines, ~{mins:.1f} min of speech, "
+            f"~{stats['total_words']} words"
+        )
+
+
+def main() -> int:
+    # First, a light pass just for --config, so its values can be used as
+    # defaults for the full parser (CLI flags will still override them).
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=Path, default=None)
+    pre_args, _ = pre_parser.parse_known_args()
+
+    config_defaults = {}
+    if pre_args.config:
+        from voxlib.config import load_config
+        config_defaults = load_config(pre_args.config)
+
+    parser = build_arg_parser(config_defaults)
+    args = parser.parse_args()
+
+    configure_logging(args.verbose, args.log_file)
+
+    language = None if args.language.lower() == "auto" else args.language
+
+    # Import the heavy dependencies (torch, pyannote, whisper) only here,
+    # not at the top of the module — so --help and argument parsing work
+    # even if the ML libraries aren't installed yet.
+    from voxlib.pipeline import run_pipeline
+
+    try:
+        result = run_pipeline(
+            input_path=args.input,
+            reference_voice=args.reference,
+            output_dir=args.output_dir,
+            hf_token=args.hf_token,
+            whisper_model=args.whisper_model,
+            language=language,
+            device=args.device,
+            threshold=args.threshold,
+            use_diarization=not args.no_diarization,
+            use_cache=not args.no_cache,
+            split_chars=args.split_chars,
+            low_confidence_threshold=args.low_confidence_threshold,
+            dry_run=args.dry_run,
+            remove_fillers=args.remove_fillers,
+            batch_size=args.batch_size,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logging.error("Error: %s", exc)
+        return 1
+
+    if result.get("dry_run"):
+        _print_dry_run_result(result)
+    else:
+        _print_full_result(result)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
