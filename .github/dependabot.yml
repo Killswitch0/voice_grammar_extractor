@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      # torch and torchaudio must move together — see requirements.txt for
+      # the incident where a mismatched pair broke diarization at runtime.
+      torch:
+        patterns:
+          - "torch"
+          - "torchaudio"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
