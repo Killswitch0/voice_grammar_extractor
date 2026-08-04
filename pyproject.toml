@@ -33,3 +33,10 @@ packages = ["voxlib"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff.lint]
+# Real-bug rules only (unused imports/vars, undefined names, syntax errors) —
+# deliberately not pulling in isort/pyupgrade/etc. style rules, which would
+# force a large unrelated reformatting diff across the codebase for a
+# solo project where that churn isn't worth it.
+select = ["E4", "E7", "E9", "F"]
