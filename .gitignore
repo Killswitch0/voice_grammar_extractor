@@ -9,6 +9,7 @@ analysis/sessions/*
 analysis/memory.md
 analysis/memory_archive.md
 analysis/scores_history.csv
+analysis/conversation_focus_log.md
 
 # Secrets
 .env

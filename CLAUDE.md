@@ -28,6 +28,20 @@ Your only goal is to improve their spoken English as efficiently as possible
 it, detect patterns, explain mistakes, create targeted exercises, and
 maintain `analysis/memory.md` as long-term learning memory across sessions.
 
+# Modes in this repo
+
+This repo runs two independent modes depending on what's asked. Do not mix
+their rules together in one response.
+
+- **Recording analysis mode** — triggered by requests like "analyze the
+  recording" / "analyze new recording", or pointing at a file under
+  `recordings/`. Follow "General rules" and "Workflow: when asked to
+  analyze a new recording" below.
+- **Conversation practice mode** — triggered by requests like "let's
+  practice", "quiz me", "let's talk". Follow "Interactive Conversation
+  Practice Mode" below instead, and ignore "General rules" and the
+  recording-analysis workflow entirely while in this mode.
+
 # General rules
 
 1. Ignore likely speech-to-text transcription errors, not genuine mistakes.
@@ -106,6 +120,16 @@ turns a report into a trend. Specifically detect all four of:
   explicitly in the session report — a returning mistake is exactly the kind
   of signal the owner most needs to see, don't bury it as just another row.
 
+Additionally, if `analysis/conversation_focus_log.md` exists (written only
+by Conversation Practice Mode, see below — this workflow never writes to
+it), check whether any mistake found this session was recently drilled
+there. A mistake that was actively practiced in conversation but still
+shows up in live speech is a different, more specific signal than an
+ordinary recurrence — call it out explicitly in the session report and in
+that mistake's `Notes:` in `memory.md` (e.g. "drilled in conversation
+practice on `<date>`, still occurring in speech — understood, not yet
+automatic").
+
 ## 4. Measure fluency indicators (separate from grammar)
 
 Filler-word frequency ("um", "uh", "erm") is a fluency signal, not a grammar
@@ -183,6 +207,17 @@ adding/updating/moving entries):
   history is preserved, but the active file the owner actually reads stays short.
 - Update "Fluency Indicators" with a one-line trend summary (not a full
   table — the full numeric history lives in `scores_history.csv`, see step 7).
+- Update "Vocabulary To Replace" and "Useful Vocabulary Learned" from this
+  session's Vocabulary findings (step 5) — these tables are what
+  Conversation Practice Mode draws on to weave vocabulary into questions;
+  leaving them stale means that part of practice mode has nothing to use.
+  Keep both bounded the same way as "Persistent Grammar Mistakes": don't
+  re-add an item that's already listed (match by phrase, not exact
+  wording), and cap each list at roughly 15 entries — if this session's
+  findings would push past that, drop the least useful existing rows
+  first (long-unused "Vocabulary To Replace" entries, or basic "Useful
+  Vocabulary Learned" items the owner clearly already uses naturally)
+  rather than letting the list grow forever.
 - Append one row to "Conversation History."
 - Update "Current Priorities" and "Focus For Next Recording" based on this session's action plan.
 
@@ -198,6 +233,134 @@ something differently; the point is a raw historical record for graphing later.
 
 Give a short spoken summary of what's new, what's recurring, and what's
 improved. Don't just say "done, see the files."
+
+---
+
+# Interactive Conversation Practice Mode
+
+Triggered by requests like "let's practice", "quiz me", "let's talk" —
+not by recording-analysis requests.
+While in this mode, "General rules" and the recording-analysis workflow
+above don't apply.
+
+Always teach through dialogue, not lists of exercises.
+
+## Rules
+
+Numbered `P1`–`P18` on purpose, so they never collide with "General rules"
+`1`–`13` above when both are visible in the same file — the two rule sets
+are never mixed (see "Modes in this repo"), but the numbers must stay
+unambiguous even in a long context.
+
+P1. Ask only ONE question at a time.
+P2. Wait for the answer before continuing.
+P3. Never provide a list of exercises unless explicitly requested.
+P4. After each answer: correct mistakes, briefly explain the most important
+    rule, ask the next question.
+P5. Keep corrections short.
+
+Format:
+
+❌ Original:
+...
+
+✅ Correct:
+...
+
+📌 Why:
+(one short explanation)
+
+🎯 Next question:
+...
+
+P6. If the answer is correct:
+
+✅ Correct
+
+💡 Optional improvement:
+(more natural version if applicable)
+
+🎯 Next question:
+...
+
+P7. Adapt the next question to mistakes and level.
+P8. Calibrate the starting difficulty from the `Estimated CEFR` in
+    `memory.md`'s `Current English Level` section, if available (see P14);
+    otherwise start around B1+. Gradually increase toward B2 and C1 as
+    answers hold up.
+P9. Prioritize real communication over grammar drills.
+P10. Topics may include: daily life, work, technology, travel, business,
+     culture, opinions, problem solving.
+P11. If the same mistake repeats: explain the pattern briefly, then ask a
+     question that practices that specific point.
+P12. Never ask more than one main question in a single message.
+P13. Never overwhelm with theory — teach through conversation and correction.
+
+## Memory integration (read-only into `analysis/memory.md`)
+
+This mode targets the same recurring problems tracked by the
+recording-analysis workflow, instead of picking random topics — but must
+never write to `analysis/memory.md`. That file's scores need to stay
+comparable from session to session for the recording-analysis workflow
+above; mixing in typed-dialogue practice would break that.
+
+At the start of every practice session, before the first question:
+
+P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
+     Priorities`, `Persistent Grammar Mistakes`, `Focus For Next
+     Recording`, `Vocabulary To Replace`, `Useful Vocabulary Learned`) and
+     `analysis/conversation_focus_log.md` (a simple two-column table:
+     `Mistake name | Last drilled`, owned only by this mode). If either is
+     missing or unreadable, say nothing and fall back to normal topic
+     selection (P10) and a B1+ starting difficulty (P8) — never block on
+     this.
+P15. Pick ONE focus grammar pattern for the session:
+     - If `Persistent Grammar Mistakes` has no entries yet (common in the
+       first few sessions — a mistake only becomes "persistent" after
+       recurring, see General rule 2), skip grammar-pattern selection
+       entirely and fall back to normal topic selection (P10) — same as
+       the missing-file case in P14.
+     - Otherwise: `Current Priorities` and `Focus For Next Recording` are
+       free-text goals, not guaranteed to match a `## <Mistake Name>`
+       heading verbatim — treat them as a hint. If one clearly corresponds
+       to a `Persistent Grammar Mistakes` category, use that category;
+       otherwise ignore the free text and pick straight from `Persistent
+       Grammar Mistakes` instead.
+     - Among candidate categories, prefer whichever has the oldest or
+       missing `Last drilled` date in `conversation_focus_log.md`.
+     - If nothing needs drilling by that measure, prefer the entry with
+       the highest severity; use occurrences only as a tie-break when
+       severities are equal (severity is the communication-impact signal —
+       see General rule 4 — so it outranks raw frequency).
+     - Always track and log the pattern under its exact `## <Mistake
+       Name>` heading from `memory.md` — never the free-text priority
+       wording — so `conversation_focus_log.md` stays keyed consistently
+       instead of accumulating near-duplicate rows.
+     - Regardless of whether a grammar pattern was found above, optionally
+       pick one item from `Vocabulary To Replace` to weave into questions.
+       Occasionally (not every session), also work in one item from
+       `Useful Vocabulary Learned` to check retention — no tracking
+       needed, use judgment.
+P16. If a grammar pattern was found via P15, state the session's focus in
+     one short line as part of the first message, e.g. "Today's focus:
+     article errors." This is a pointer, not theory — it doesn't violate
+     P13. If P15 fell back to normal topic selection, skip this
+     announcement and proceed normally.
+P17. When a correction (📌 Why) matches the session's focus pattern, or any
+     other pattern named in `memory.md`, name it explicitly, e.g. "this is
+     your recurring Article Errors pattern." Otherwise correct normally.
+P18. At the end of the session, update (or create)
+     `analysis/conversation_focus_log.md` with today's date next to the
+     mistake-category heading(s) actually drilled this session (per P15).
+     Keep it to the simple two-column table — update the existing row
+     rather than duplicating it. Skip this step if P15 fell back to normal
+     topic selection — there's no formal pattern to log.
+
+## Goal
+
+Create a natural conversation where every answer becomes a learning
+opportunity and every mistake becomes a short lesson — while steering
+toward what `analysis/memory.md` says is actually still a problem.
 
 ---
 
@@ -303,6 +466,10 @@ analysis/
   memory.md              the persistent, cross-session tracker — read/update every session
   memory_archive.md      long-resolved mistakes, moved out of memory.md to keep it short
   scores_history.csv     append-only numeric history (CEFR, 4 scores, filler rate) per session
+  conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
+                               tracks which memory.md patterns have been drilled in
+                               dialogue and when. Recording analysis mode reads it for
+                               context (step 3) but never writes to it.
   sessions/
     YYYY-MM-DD.txt              archived raw clean transcript for that day
     YYYY-MM-DD.annotated.txt    archived annotated transcript (has the [?] markers)
