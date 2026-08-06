@@ -22,6 +22,12 @@ from .console import track
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_THRESHOLD = 0.75
+# Below this, the best-matching speaker isn't a confident match at all (likely
+# a mismatched reference sample or wrong file) — don't trust gap-based auto
+# calibration in that case, since it would still confidently pick *someone*.
+MIN_CONFIDENT_SIMILARITY = 0.3
+
 
 @dataclass
 class Segment:
@@ -97,7 +103,7 @@ class DiarizationEngine:
         wav_path: Path,
         segments: list[Segment],
         reference_embedding: np.ndarray,
-        threshold: float = 0.75,
+        threshold: float | None = None,
         min_segment_duration: float = 0.3,
     ) -> list[IdentifiedSegment]:
         """
@@ -129,7 +135,7 @@ class DiarizationEngine:
             speaker_similarity[speaker] = self.cosine_similarity(avg_embedding, reference_embedding)
 
         logger.info("Speaker similarity to the reference voice: %s", speaker_similarity)
-        self._log_threshold_suggestion(speaker_similarity, threshold)
+        effective_threshold = self.resolve_threshold(speaker_similarity, threshold)
 
         result: list[IdentifiedSegment] = []
         for seg in segments:
@@ -138,32 +144,73 @@ class DiarizationEngine:
                 IdentifiedSegment(
                     start=seg.start,
                     end=seg.end,
-                    is_me=sim >= threshold,
+                    is_me=sim >= effective_threshold,
                     similarity=sim,
                 )
             )
         return result
 
     @staticmethod
-    def _log_threshold_suggestion(speaker_similarity: dict[str, float], current_threshold: float) -> None:
+    def _suggest_threshold_from_gap(speaker_similarity: dict[str, float]) -> tuple[float, float] | None:
         """
         If there are two or more speakers, finds the biggest gap between
-        adjacent similarity values and suggests a threshold in the middle of
-        that gap — this is usually the point where "definitely you" ends and
-        "definitely not you" begins. Does not change classification behavior,
-        only informs the user via the log.
+        adjacent similarity values and returns (suggested_threshold, gap_size)
+        for the middle of that gap — this is usually the point where
+        "definitely you" ends and "definitely not you" begins. Returns None
+        if there's nothing to compare (fewer than 2 speakers).
         """
         values = sorted(speaker_similarity.values(), reverse=True)
         if len(values) < 2:
-            return
+            return None
 
         gaps = [(values[i] - values[i + 1], i) for i in range(len(values) - 1)]
         biggest_gap, idx = max(gaps)
         suggested = (values[idx] + values[idx + 1]) / 2
+        return suggested, biggest_gap
 
-        if abs(suggested - current_threshold) > 0.03:
-            logger.info(
-                "Hint: based on the gap in voice similarity (%.2f), a threshold of ~%.2f "
-                "might separate you from the rest more precisely (currently using --threshold %.2f).",
-                biggest_gap, suggested, current_threshold,
+    @staticmethod
+    def resolve_threshold(speaker_similarity: dict[str, float], explicit_threshold: float | None) -> float:
+        """
+        Decides which threshold to actually use for "is this speaker me".
+
+        If the caller gave an explicit threshold (from --threshold or a config
+        file), it's used as-is — but a hint is still logged if the gap-based
+        suggestion disagrees with it noticeably, so the user can fine-tune.
+
+        Otherwise, auto-calibrates from the biggest gap between speakers'
+        similarity to the reference voice. Falls back to DEFAULT_THRESHOLD if
+        there's no gap to compute (fewer than 2 speakers) or the best match is
+        too weak to trust (MIN_CONFIDENT_SIMILARITY) — a low best-similarity
+        usually means a mismatched reference sample or file, and the gap logic
+        would otherwise still confidently point at *someone*.
+        """
+        gap_result = DiarizationEngine._suggest_threshold_from_gap(speaker_similarity)
+
+        if explicit_threshold is not None:
+            if gap_result is not None:
+                suggested, gap = gap_result
+                if abs(suggested - explicit_threshold) > 0.03:
+                    logger.info(
+                        "Hint: based on the gap in voice similarity (%.2f), a threshold of ~%.2f "
+                        "might separate you from the rest more precisely (currently using --threshold %.2f).",
+                        gap, suggested, explicit_threshold,
+                    )
+            return explicit_threshold
+
+        top_similarity = max(speaker_similarity.values(), default=-1.0)
+        if gap_result is None or top_similarity < MIN_CONFIDENT_SIMILARITY:
+            logger.warning(
+                "Could not confidently auto-calibrate a threshold (best similarity to the "
+                "reference voice was %.2f) — falling back to the default %.2f. Pass --threshold "
+                "explicitly if this misidentifies your lines.",
+                top_similarity, DEFAULT_THRESHOLD,
             )
+            return DEFAULT_THRESHOLD
+
+        suggested, _ = gap_result
+        logger.info(
+            "Auto-selected threshold %.2f based on the gap in voice similarity to the "
+            "reference (no --threshold given).",
+            suggested,
+        )
+        return suggested
