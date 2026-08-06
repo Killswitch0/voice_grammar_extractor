@@ -20,8 +20,11 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
+from rich.markup import escape
+
 from . import cache
 from .audio_utils import extract_audio, KNOWN_EXTENSIONS
+from .console import console
 from .diarization import DiarizationEngine, Segment, IdentifiedSegment
 from .transcriber import Transcriber, TranscribedLine
 from .filler_filter import remove_fillers as _remove_fillers
@@ -389,6 +392,8 @@ def run_pipeline(
         if dry_run:
             per_file_stats = []
             for file_path in input_files:
+                if len(input_files) > 1:
+                    console.rule(escape(file_path.name))
                 logger.info("=== Dry run: %s ===", file_path.name)
                 wav_path = extract_audio(file_path, tmp_dir)
                 stats = _dry_run_stats_for_file(
@@ -404,6 +409,8 @@ def run_pipeline(
         transcriber = Transcriber(model_size=whisper_model, device=device, batch_size=batch_size)
 
         for file_path in input_files:
+            if len(input_files) > 1:
+                console.rule(escape(file_path.name))
             logger.info("=== Processing: %s ===", file_path.name)
             transcribed = _process_single_file(
                 file_path=file_path,

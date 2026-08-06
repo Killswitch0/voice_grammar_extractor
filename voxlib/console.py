@@ -11,16 +11,41 @@ via its ProgressHook, a separate library's own display we don't control.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Iterator, TypeVar
 
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.markup import escape
+from rich.panel import Panel
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 console = Console()
 
 T = TypeVar("T")
+
+
+def print_error(message: str, log_file: Path | None = None) -> None:
+    """
+    The one shared look for a user-facing error: a red panel on the console.
+
+    Deliberately doesn't go through the logging module — the root logger's
+    RichHandler is always attached, so a logger.error() call here would also
+    print a second, plain-text copy of the same message right next to this
+    panel. If a --log-file is configured, the message is appended to it
+    directly instead, in the same plain format configure_logging's
+    FileHandler already uses.
+
+    The message is escaped before rendering: exception text routinely looks
+    like "[Errno 2] No such file or directory: ..." and Rich would otherwise
+    silently swallow the "[Errno 2]" part, mistaking it for a markup tag.
+    """
+    console.print()
+    console.print(Panel(escape(message), title="[bold red]Error[/]", border_style="red"))
+    if log_file:
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%H:%M:%S} [ERROR] {message}\n")
 
 
 def configure_logging(verbose: bool = False, log_file: Path | None = None) -> None:

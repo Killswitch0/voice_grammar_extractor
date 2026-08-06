@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
@@ -99,3 +100,48 @@ def test_play_audio_skips_players_entirely_when_in_a_container(monkeypatch, caps
     out = capsys.readouterr().out
     assert "sample.wav" in out
     assert "container" in out.lower()
+
+
+def test_confirm_overwrite_returns_true_without_prompting_when_nothing_exists(monkeypatch):
+    monkeypatch.setattr(isp.Path, "exists", lambda self: False)
+    with patch("identify_speaker.Confirm.ask") as mock_ask:
+        assert isp._confirm_overwrite(Path("my_reference.wav")) is True
+        mock_ask.assert_not_called()
+
+
+def test_confirm_overwrite_returns_false_when_user_declines(monkeypatch):
+    monkeypatch.setattr(isp.Path, "exists", lambda self: True)
+    with patch("identify_speaker.Confirm.ask", return_value=False):
+        assert isp._confirm_overwrite(Path("my_reference.wav")) is False
+
+
+def test_confirm_overwrite_returns_true_when_user_accepts(monkeypatch):
+    monkeypatch.setattr(isp.Path, "exists", lambda self: True)
+    with patch("identify_speaker.Confirm.ask", return_value=True):
+        assert isp._confirm_overwrite(Path("my_reference.wav")) is True
+
+
+def test_confirm_overwrite_defaults_to_no(monkeypatch):
+    # Overwriting the permanent reference sample is destructive — the prompt
+    # must default to declining, not accepting, a blank Enter.
+    monkeypatch.setattr(isp.Path, "exists", lambda self: True)
+    with patch("identify_speaker.Confirm.ask", return_value=False) as mock_ask:
+        isp._confirm_overwrite(Path("my_reference.wav"))
+        assert mock_ask.call_args.kwargs.get("default") is False
+
+
+def test_main_handles_keyboard_interrupt_gracefully(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(
+        sys, "argv",
+        ["identify_speaker.py", "dummy.mp4", "--hf-token", "dummy", "-o", str(tmp_path)],
+    )
+
+    def raise_interrupt(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("voxlib.audio_utils.extract_audio", raise_interrupt)
+
+    exit_code = isp.main()
+
+    assert exit_code == 130
+    assert "Cancelled" in capsys.readouterr().out
