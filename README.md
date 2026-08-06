@@ -149,7 +149,7 @@ python main.py monologue.mp4 --no-diarization -o output/
 |---|---|
 | `--language en` | Speech language for recognition (default `en`). `--language auto` — auto-detect (for mixed-language speech) |
 | `--whisper-model medium` | Recognition quality: `tiny` < `base` < `small` < `medium` < `large-v3`. Bigger = more accurate but slower |
-| `--threshold 0.8` | Voice similarity threshold. Raise it if the system confuses you with others; lower it if it misses your lines |
+| `--threshold 0.8` | Voice similarity threshold. If omitted, it's auto-calibrated per recording; pass it explicitly to override — raise it if the system confuses you with others, lower it if it misses your lines |
 | `--device cuda` | Use GPU, if available |
 | `-v` | Verbose logging |
 | `--config path.yaml` | Take settings from a YAML file instead of a long list of flags (see `config.example.yaml`) |

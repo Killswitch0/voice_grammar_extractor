@@ -101,10 +101,11 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     parser.add_argument(
         "--threshold",
         type=float,
-        default=config_defaults.get("threshold", 0.75),
-        help="Cosine similarity threshold for recognizing your voice (default: 0.75). "
-             "Raise it if the system confuses you with others; lower it if it misses your lines. "
-             "The log after each run includes a hint with a recommended value.",
+        default=config_defaults.get("threshold"),
+        help="Cosine similarity threshold for recognizing your voice. If not given, it's "
+             "auto-calibrated per recording from the gap between speakers' similarity to "
+             "your reference voice (falls back to 0.75 if no speaker confidently matches). "
+             "Raise it if the system confuses you with others; lower it if it misses your lines.",
     )
     parser.add_argument(
         "--no-diarization",

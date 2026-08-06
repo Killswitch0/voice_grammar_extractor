@@ -67,7 +67,7 @@ def _diarize_and_identify(
     use_cache: bool,
     diarizer: DiarizationEngine,
     reference_embedding,
-    threshold: float,
+    threshold: float | None,
     reference_fingerprint: dict | None = None,
     transcription_params: dict | None = None,
 ) -> tuple[list[Segment], list[IdentifiedSegment], dict]:
@@ -97,14 +97,22 @@ def _diarize_and_identify(
         # is_me is re-derived fresh from it every time — so changing
         # --threshold on an already-processed file takes effect immediately,
         # without needing to recompute embeddings.
+        speaker_similarity = {
+            seg.speaker_label: ident["similarity"]
+            for seg, ident in zip(segments, file_cache["identification"])
+        }
+        effective_threshold = DiarizationEngine.resolve_threshold(speaker_similarity, threshold)
         identified = [
             IdentifiedSegment(
                 start=s["start"], end=s["end"],
-                similarity=s["similarity"], is_me=s["similarity"] >= threshold,
+                similarity=s["similarity"], is_me=s["similarity"] >= effective_threshold,
             )
             for s in file_cache["identification"]
         ]
-        logger.info("'Mine' segment identification loaded from cache (re-checked against threshold=%.2f).", threshold)
+        logger.info(
+            "'Mine' segment identification loaded from cache (re-checked against threshold=%.2f).",
+            effective_threshold,
+        )
     else:
         identified = diarizer.identify_my_segments(
             wav_path, segments, reference_embedding, threshold=threshold
@@ -147,7 +155,7 @@ def _process_single_file(
     reference_embedding,
     transcriber: Transcriber,
     language: str | None,
-    threshold: float,
+    threshold: float | None,
     remove_fillers: bool,
     reference_fingerprint: dict | None = None,
     transcription_params: dict | None = None,
@@ -244,7 +252,7 @@ def _dry_run_stats_for_file(
     use_cache: bool,
     diarizer: DiarizationEngine,
     reference_embedding,
-    threshold: float,
+    threshold: float | None,
     reference_fingerprint: dict | None = None,
 ) -> dict:
     segments, identified, _ = _diarize_and_identify(
@@ -320,7 +328,7 @@ def run_pipeline(
     whisper_model: str = "small",
     language: str | None = "en",
     device: str = "cpu",
-    threshold: float = 0.75,
+    threshold: float | None = None,
     use_diarization: bool = True,
     use_cache: bool = True,
     split_chars: int | None = None,
