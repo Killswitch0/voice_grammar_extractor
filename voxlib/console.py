@@ -11,6 +11,7 @@ via its ProgressHook, a separate library's own display we don't control.
 from __future__ import annotations
 
 import logging
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Iterator, TypeVar
@@ -26,7 +27,12 @@ console = Console()
 T = TypeVar("T")
 
 
-def print_error(message: str, log_file: Path | None = None) -> None:
+def print_error(
+    message: str,
+    log_file: Path | None = None,
+    exc: BaseException | None = None,
+    verbose: bool = False,
+) -> None:
     """
     The one shared look for a user-facing error: a red panel on the console.
 
@@ -40,12 +46,28 @@ def print_error(message: str, log_file: Path | None = None) -> None:
     The message is escaped before rendering: exception text routinely looks
     like "[Errno 2] No such file or directory: ..." and Rich would otherwise
     silently swallow the "[Errno 2]" part, mistaking it for a markup tag.
+
+    exc: the original exception, if this error came from an unexpected
+    (not specifically anticipated) failure. Passing it doesn't change the
+    console panel by default — only the one-line message is ever shown there,
+    to keep this panel the single, uncluttered thing the user sees — but the
+    full traceback is always written to --log-file (so a bug report has
+    something to debug from), and also printed to the console when verbose,
+    since -v is the explicit signal that more detail is wanted.
     """
     console.print()
     console.print(Panel(escape(message), title="[bold red]Error[/]", border_style="red"))
+
+    tb_text = "".join(traceback.format_exception(exc)) if exc is not None else None
+
+    if verbose and tb_text:
+        console.print(escape(tb_text))
+
     if log_file:
         with log_file.open("a", encoding="utf-8") as f:
             f.write(f"{datetime.now():%H:%M:%S} [ERROR] {message}\n")
+            if tb_text:
+                f.write(tb_text)
 
 
 def configure_logging(verbose: bool = False, log_file: Path | None = None) -> None:
