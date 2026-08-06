@@ -70,6 +70,17 @@ their rules together in one response.
     evidence in this session's transcript — otherwise a score drifting up or
     down session to session with no real change is noise, not signal, and
     undermines the whole point of tracking it over time.
+14. **Rank mistakes by impact, not raw frequency.** Wherever mistakes get
+    ranked for attention — `Current Priorities` in `memory.md` (step 6) and
+    focus selection in Conversation Practice Mode (P15) — use
+    `impact = severity × occurrences`, not occurrence count alone. A
+    high-frequency but low-severity error (e.g. a missing article) should
+    not automatically outrank a lower-frequency error that actually breaks
+    communication (e.g. wrong verb agreement) — severity is the multiplier
+    that keeps priority weighted toward what hurts intelligibility, per
+    rule 4. When comparing across sessions, weight recent sessions' occurrences
+    more than older ones so a mistake that's fading doesn't keep outranking
+    one that's actively getting worse.
 
 # Workflow: when asked to analyze a new recording
 
@@ -219,7 +230,9 @@ adding/updating/moving entries):
   Vocabulary Learned" items the owner clearly already uses naturally)
   rather than letting the list grow forever.
 - Append one row to "Conversation History."
-- Update "Current Priorities" and "Focus For Next Recording" based on this session's action plan.
+- Update "Current Priorities" and "Focus For Next Recording" based on this
+  session's action plan — rank "Current Priorities" by impact (severity ×
+  occurrences, rule 14), not by raw occurrence count alone.
 
 ## 7. Append to `analysis/scores_history.csv`
 
@@ -304,14 +317,27 @@ never write to `analysis/memory.md`. That file's scores need to stay
 comparable from session to session for the recording-analysis workflow
 above; mixing in typed-dialogue practice would break that.
 
+`analysis/conversation_focus_log.md` structure (owned only by this mode):
+
+```markdown
+| Mistake name | Last drilled | Correct streak | Next due |
+|---|---|---|---|
+```
+
+- `Last drilled` — date this pattern was last practiced in this mode.
+- `Correct streak` — consecutive drills in a row where the pattern did
+  NOT produce an error during the session. Resets to 0 the moment it does.
+- `Next due` — the spaced-repetition date this pattern should next be
+  prioritized: `Last drilled` + `min(2^Correct streak, 14)` days. A row
+  that doesn't exist yet counts as due immediately — see P15.
+
 At the start of every practice session, before the first question:
 
 P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
      Priorities`, `Persistent Grammar Mistakes`, `Focus For Next
      Recording`, `Vocabulary To Replace`, `Useful Vocabulary Learned`) and
-     `analysis/conversation_focus_log.md` (a simple two-column table:
-     `Mistake name | Last drilled`, owned only by this mode). If either is
-     missing or unreadable, say nothing and fall back to normal topic
+     `analysis/conversation_focus_log.md` (see structure above). If either
+     is missing or unreadable, say nothing and fall back to normal topic
      selection (P10) and a B1+ starting difficulty (P8) — never block on
      this.
 P15. Pick ONE focus grammar pattern for the session:
@@ -326,12 +352,14 @@ P15. Pick ONE focus grammar pattern for the session:
        to a `Persistent Grammar Mistakes` category, use that category;
        otherwise ignore the free text and pick straight from `Persistent
        Grammar Mistakes` instead.
-     - Among candidate categories, prefer whichever has the oldest or
-       missing `Last drilled` date in `conversation_focus_log.md`.
-     - If nothing needs drilling by that measure, prefer the entry with
-       the highest severity; use occurrences only as a tie-break when
-       severities are equal (severity is the communication-impact signal —
-       see General rule 4 — so it outranks raw frequency).
+     - Among candidate categories, use each one's `Next due` date in
+       `conversation_focus_log.md` as a spaced-repetition schedule: prefer
+       whichever is most overdue (earliest `Next due`). A category with no
+       logged row yet counts as more overdue than any category that has
+       one — drill unlogged patterns before re-checking scheduled ones.
+     - If several candidates are equally due (tied `Next due` dates, or
+       several with no row yet), break the tie by impact — severity ×
+       occurrences, rule 14 — not plain severity or raw frequency alone.
      - Always track and log the pattern under its exact `## <Mistake
        Name>` heading from `memory.md` — never the free-text priority
        wording — so `conversation_focus_log.md` stays keyed consistently
@@ -350,11 +378,19 @@ P17. When a correction (📌 Why) matches the session's focus pattern, or any
      other pattern named in `memory.md`, name it explicitly, e.g. "this is
      your recurring Article Errors pattern." Otherwise correct normally.
 P18. At the end of the session, update (or create)
-     `analysis/conversation_focus_log.md` with today's date next to the
-     mistake-category heading(s) actually drilled this session (per P15).
-     Keep it to the simple two-column table — update the existing row
-     rather than duplicating it. Skip this step if P15 fell back to normal
-     topic selection — there's no formal pattern to log.
+     `analysis/conversation_focus_log.md` for the mistake-category
+     heading(s) actually drilled this session (per P15) — update the
+     existing row rather than duplicating it. For each drilled pattern:
+     - Set `Last drilled` to today.
+     - If it held up with no error during this session, increment
+       `Correct streak` by 1 and set `Next due` to today +
+       `min(2^Correct streak, 14)` days — the gap stretches out the
+       longer it keeps holding up.
+     - If it still produced an error this session, reset `Correct streak`
+       to 0 and set `Next due` to tomorrow — a mistake that resurfaces
+       needs re-checking soon, not a longer gap.
+     Skip this step if P15 fell back to normal topic selection — there's
+     no formal pattern to log.
 
 ## Goal
 
@@ -468,8 +504,10 @@ analysis/
   scores_history.csv     append-only numeric history (CEFR, 4 scores, filler rate) per session
   conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
                                tracks which memory.md patterns have been drilled in
-                               dialogue and when. Recording analysis mode reads it for
-                               context (step 3) but never writes to it.
+                               dialogue, when, and on a spaced-repetition schedule
+                               (Last drilled / Correct streak / Next due). Recording
+                               analysis mode reads it for context (step 3) but never
+                               writes to it.
   sessions/
     YYYY-MM-DD.txt              archived raw clean transcript for that day
     YYYY-MM-DD.annotated.txt    archived annotated transcript (has the [?] markers)
