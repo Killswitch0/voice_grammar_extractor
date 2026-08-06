@@ -258,6 +258,9 @@ def main() -> int:
             remove_fillers=args.remove_fillers,
             batch_size=args.batch_size,
         )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/]")
+        return 130
     except Exception as exc:  # noqa: BLE001
         print_error(str(exc), log_file=args.log_file)
         return 1

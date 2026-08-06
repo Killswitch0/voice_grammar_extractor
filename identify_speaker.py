@@ -186,6 +186,13 @@ def main() -> int:
         chosen_speaker = speaker_list[int(choice) - 1]
 
         reference_path = args.reference_dir / "my_reference.wav"
+        if reference_path.exists():
+            if not Confirm.ask(
+                f"[yellow]{escape(str(reference_path))} already exists — overwrite?[/]", default=False
+            ):
+                console.print("Left untouched.")
+                return 1
+
         args.reference_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(speaker_samples[chosen_speaker], reference_path)
 
@@ -198,4 +205,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/]")
+        sys.exit(130)
