@@ -33,6 +33,13 @@ packages = ["voxlib"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Slow tests need torch/faster-whisper actually installed (not present in the
+# default CI job, see .github/workflows/tests.yml) — excluded by default,
+# an explicit `-m slow` on the command line overrides this and runs only them.
+addopts = "-m 'not slow'"
+markers = [
+    "slow: requires torch/faster-whisper actually installed; not run in the default CI job, run manually with `pytest -m slow`",
+]
 
 [tool.ruff.lint]
 # Real-bug rules only (unused imports/vars, undefined names, syntax errors) —

@@ -352,6 +352,10 @@ def run_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = output_dir / ".cache"
     all_lines: list[SourcedLine] = []
+    # Files that raised while being processed — kept separate from a hard
+    # abort so a single bad recording (corrupt file, unsupported codec)
+    # doesn't cost the output for every other file in the batch.
+    failed_files: list[dict] = []
 
     # Settings that affect the resulting transcription TEXT (not just which
     # segments get transcribed) — a cached transcription is only trusted if
@@ -395,14 +399,22 @@ def run_pipeline(
                 if len(input_files) > 1:
                     console.rule(escape(file_path.name))
                 logger.info("=== Dry run: %s ===", file_path.name)
-                wav_path = extract_audio(file_path, tmp_dir)
-                stats = _dry_run_stats_for_file(
-                    file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
-                    reference_fingerprint=reference_fingerprint,
-                )
+                try:
+                    wav_path = extract_audio(file_path, tmp_dir)
+                    stats = _dry_run_stats_for_file(
+                        file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
+                        reference_fingerprint=reference_fingerprint,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Failed to process %s: %s", file_path.name, exc)
+                    failed_files.append({"file": file_path.name, "error": str(exc)})
+                    continue
                 per_file_stats.append(stats)
             _log_dry_run_summary(per_file_stats)
-            return {"dry_run": True, "per_file": per_file_stats}
+            result = {"dry_run": True, "per_file": per_file_stats}
+            if failed_files:
+                result["failed_files"] = failed_files
+            return result
 
         # Full run: the transcriber is only needed here, not in dry-run,
         # so --dry-run runs faster and doesn't load whisper for nothing.
@@ -412,21 +424,31 @@ def run_pipeline(
             if len(input_files) > 1:
                 console.rule(escape(file_path.name))
             logger.info("=== Processing: %s ===", file_path.name)
-            transcribed = _process_single_file(
-                file_path=file_path,
-                tmp_dir=tmp_dir,
-                cache_dir=cache_dir,
-                use_cache=use_cache,
-                use_diarization=use_diarization,
-                diarizer=diarizer,
-                reference_embedding=reference_embedding,
-                transcriber=transcriber,
-                language=language,
-                threshold=threshold,
-                remove_fillers=remove_fillers,
-                reference_fingerprint=reference_fingerprint,
-                transcription_params=transcription_params,
-            )
+            try:
+                transcribed = _process_single_file(
+                    file_path=file_path,
+                    tmp_dir=tmp_dir,
+                    cache_dir=cache_dir,
+                    use_cache=use_cache,
+                    use_diarization=use_diarization,
+                    diarizer=diarizer,
+                    reference_embedding=reference_embedding,
+                    transcriber=transcriber,
+                    language=language,
+                    threshold=threshold,
+                    remove_fillers=remove_fillers,
+                    reference_fingerprint=reference_fingerprint,
+                    transcription_params=transcription_params,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # A per-file failure (corrupt recording, unsupported codec, a
+                # transient model error) shouldn't cost the output for every
+                # other file already processed in this batch — already-cached
+                # progress for THIS file is untouched, so a re-run picks up
+                # right where it left off once the underlying issue is fixed.
+                logger.exception("Failed to process %s: %s", file_path.name, exc)
+                failed_files.append({"file": file_path.name, "error": str(exc)})
+                continue
 
             for line in transcribed:
                 all_lines.append(
@@ -446,6 +468,8 @@ def run_pipeline(
     write_clean_document(all_lines, clean_path)
 
     result: dict = {"annotated": annotated_path, "clean": clean_path}
+    if failed_files:
+        result["failed_files"] = failed_files
 
     if split_chars:
         part_paths = write_split_documents(all_lines, output_dir, max_chars=split_chars)

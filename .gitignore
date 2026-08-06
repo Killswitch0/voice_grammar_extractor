@@ -25,3 +25,6 @@ dist/
 
 # Docker
 .docker/
+
+# macOS
+.DS_Store

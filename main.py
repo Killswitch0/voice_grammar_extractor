@@ -38,6 +38,19 @@ sys.path.insert(0, str(Path(__file__).parent))
 from voxlib.console import configure_logging, console, print_error  # noqa: E402
 
 
+def _threshold_type(value: str) -> float:
+    """argparse type= for --threshold: it's a cosine similarity (see
+    DiarizationEngine.cosine_similarity), which is mathematically bounded to
+    [-1.0, 1.0] — anything outside that range can only be a typo (e.g. "8.0"
+    meant as "0.8") and would otherwise silently misidentify every speaker."""
+    parsed = float(value)
+    if not (-1.0 <= parsed <= 1.0):
+        raise argparse.ArgumentTypeError(
+            f"must be between -1.0 and 1.0 (cosine similarity), got {parsed}"
+        )
+    return parsed
+
+
 def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentParser:
     config_defaults = config_defaults or {}
 
@@ -102,7 +115,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--threshold",
-        type=float,
+        type=_threshold_type,
         default=config_defaults.get("threshold"),
         help="Cosine similarity threshold for recognizing your voice. If not given, it's "
              "auto-calibrated per recording from the gap between speakers' similarity to "
@@ -216,6 +229,15 @@ def _print_full_result(result: dict) -> None:
         )
 
 
+def _print_failed_files(failed_files: list[dict]) -> None:
+    console.print()
+    console.print(f"[bold yellow]{len(failed_files)} file(s) failed and were skipped:[/]")
+    for f in failed_files:
+        console.print(f"  [yellow]{escape(f['file'])}[/]: {escape(f['error'])}")
+    console.print("Output above was still produced from the files that succeeded. "
+                  "Fix the files above and re-run — already-processed files are cached and won't be redone.")
+
+
 def main() -> int:
     # First, a light pass just for --config, so its values can be used as
     # defaults for the full parser (CLI flags will still override them).
@@ -262,13 +284,17 @@ def main() -> int:
         console.print("\n[yellow]Cancelled.[/]")
         return 130
     except Exception as exc:  # noqa: BLE001
-        print_error(str(exc), log_file=args.log_file)
+        print_error(str(exc), log_file=args.log_file, exc=exc, verbose=args.verbose)
         return 1
 
     if result.get("dry_run"):
         _print_dry_run_result(result)
     else:
         _print_full_result(result)
+
+    if result.get("failed_files"):
+        _print_failed_files(result["failed_files"])
+        return 2
 
     return 0
 
