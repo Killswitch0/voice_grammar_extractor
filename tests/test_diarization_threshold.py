@@ -66,6 +66,16 @@ def test_resolve_threshold_falls_back_when_best_match_is_too_weak(caplog):
     assert any(r.levelno == logging.WARNING for r in caplog.records)
 
 
+def test_resolve_threshold_trusts_gap_exactly_at_confidence_floor(caplog):
+    caplog.set_level(logging.INFO)
+    # Top similarity is exactly MIN_CONFIDENT_SIMILARITY (0.3) -> the floor
+    # check is strict (<), so this is still trusted, not a fallback.
+    result = DiarizationEngine.resolve_threshold({"A": 0.3, "B": 0.1}, explicit_threshold=None)
+
+    assert result == 0.2
+    assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+
 def test_resolve_threshold_falls_back_with_single_speaker(caplog):
     caplog.set_level(logging.INFO)
     result = DiarizationEngine.resolve_threshold({"A": 0.9}, explicit_threshold=None)
