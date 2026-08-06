@@ -200,6 +200,12 @@ those lines from grammar judgment rather than guess whether a "mistake" is
 real or just Whisper mishearing you. See `CLAUDE.md` for the full workflow
 and the exact `memory.md` format.
 
+`analysis/` is excluded from this project's own repo (see `.gitignore`) —
+it's your personal data, not something to publish alongside the code. That
+also means it isn't backed up anywhere by default; see
+[`analysis/BACKUP.md`](analysis/BACKUP.md) for a 10-minute setup that gives
+it its own private repo and a one-command backup.
+
 ## Installing as a console command
 
 If you don't want to type `python main.py` every time:
