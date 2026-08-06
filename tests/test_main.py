@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import main
@@ -53,3 +54,17 @@ def test_print_full_result_preserves_bracketed_paths(capsys):
     out = capsys.readouterr().out
     assert str(annotated) in out
     assert str(clean) in out
+
+
+def test_main_handles_keyboard_interrupt_gracefully(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["main.py", "dummy.mp4", "--no-diarization"])
+
+    def raise_interrupt(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("voxlib.pipeline.run_pipeline", raise_interrupt)
+
+    exit_code = main.main()
+
+    assert exit_code == 130
+    assert "Cancelled" in capsys.readouterr().out
