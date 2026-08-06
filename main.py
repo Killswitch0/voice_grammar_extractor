@@ -26,14 +26,16 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 import sys
 from pathlib import Path
 
+from rich.markup import escape
+from rich.table import Table
+
 sys.path.insert(0, str(Path(__file__).parent))
 
-from voxlib.console import configure_logging, console  # noqa: E402
+from voxlib.console import configure_logging, console, print_error  # noqa: E402
 
 
 def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentParser:
@@ -175,13 +177,24 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
 def _print_dry_run_result(result: dict) -> None:
     console.print()
     console.print("[bold cyan]=== Dry run result (no transcription) ===[/]")
+
+    table = Table(show_edge=True)
+    table.add_column("File")
+    table.add_column("Speakers", justify="right")
+    table.add_column("Your lines", justify="right")
+    table.add_column("Your speech", justify="right")
+    table.add_column("Share", justify="right")
     for s in result["per_file"]:
         mins_mine = s["duration_mine_sec"] / 60
-        console.print(
-            f"  {s['file']}: {s['num_speakers']} speakers, "
-            f"your lines {s['num_segments_mine']}/{s['num_segments_total']}, "
-            f"your speech ~{mins_mine:.1f} min ([bold]{s['mine_share_pct']:.0f}%[/])"
+        table.add_row(
+            escape(s["file"]),
+            str(s["num_speakers"]),
+            f"{s['num_segments_mine']}/{s['num_segments_total']}",
+            f"~{mins_mine:.1f} min",
+            f"[bold]{s['mine_share_pct']:.0f}%[/]",
         )
+    console.print(table)
+
     console.print()
     console.print("If the numbers look off — adjust [bold]--threshold[/] and try [bold]--dry-run[/] again.")
     console.print("Once you're happy with it — drop --dry-run and run the full processing.")
@@ -190,10 +203,10 @@ def _print_dry_run_result(result: dict) -> None:
 def _print_full_result(result: dict) -> None:
     console.print()
     console.print("[bold green]Done![/]")
-    console.print(f"  Annotated document: [cyan]{result['annotated']}[/]")
-    console.print(f"  Clean text for AI:  [cyan]{result['clean']}[/]")
+    console.print(f"  Annotated document: [cyan]{escape(str(result['annotated']))}[/]")
+    console.print(f"  Clean text for AI:  [cyan]{escape(str(result['clean']))}[/]")
     if "parts" in result:
-        console.print(f"  Parts for AI ({len(result['parts'])}): [cyan]{result['parts'][0].parent}/[/]")
+        console.print(f"  Parts for AI ({len(result['parts'])}): [cyan]{escape(str(result['parts'][0].parent))}/[/]")
     stats = result.get("stats", {})
     if stats:
         mins = stats["total_duration_sec"] / 60
@@ -246,7 +259,7 @@ def main() -> int:
             batch_size=args.batch_size,
         )
     except Exception as exc:  # noqa: BLE001
-        logging.error("Error: %s", exc)
+        print_error(str(exc), log_file=args.log_file)
         return 1
 
     if result.get("dry_run"):

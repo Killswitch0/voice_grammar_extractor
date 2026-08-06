@@ -21,9 +21,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rich.markup import escape
+from rich.prompt import Confirm, Prompt
+
 sys.path.insert(0, str(Path(__file__).parent))
 
-from voxlib.console import configure_logging  # noqa: E402
+from voxlib.console import configure_logging, console, print_error  # noqa: E402
 
 SAMPLE_DURATION_SEC = 12.0  # length of the listening sample for each speaker
 
@@ -76,7 +79,7 @@ def _play_audio(path: Path) -> None:
     instead of falsely reporting success.
     """
     if _running_in_container():
-        print(f"  (Running in a container — no audio device to play through. Open the file manually: {path})")
+        console.print(f"  [dim](Running in a container — no audio device to play through. Open the file manually: {escape(str(path))})[/]")
         return
 
     players = [
@@ -90,7 +93,7 @@ def _play_audio(path: Path) -> None:
             return
         except (FileNotFoundError, subprocess.CalledProcessError):
             continue
-    print(f"  (No audio player found on this system — open the file manually: {path})")
+    console.print(f"  [dim](No audio player found on this system — open the file manually: {escape(str(path))})[/]")
 
 
 def main() -> int:
@@ -100,7 +103,7 @@ def main() -> int:
     configure_logging(args.verbose)
 
     if not args.hf_token:
-        print("A HuggingFace token is required: --hf-token or the HF_TOKEN env var.")
+        print_error("A HuggingFace token is required: --hf-token or the HF_TOKEN env var.")
         return 1
 
     from voxlib.audio_utils import extract_audio
@@ -115,7 +118,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="identify_speaker_") as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
 
-        print("Extracting audio and running diarization (this can take a few minutes)...")
+        console.print("Extracting audio and running diarization (this can take a few minutes)...")
         wav_path = extract_audio(args.input, tmp_dir)
 
         engine = DiarizationEngine(hf_token=args.hf_token, device=args.device)
@@ -126,10 +129,10 @@ def main() -> int:
             by_speaker.setdefault(seg.speaker_label, []).append(seg)
 
         if not by_speaker:
-            print("Could not find a single speaker in the file.")
+            print_error("Could not find a single speaker in the file.")
             return 1
 
-        print(f"\nSpeakers found: {len(by_speaker)}\n")
+        console.print(f"\n[bold cyan]Speakers found: {len(by_speaker)}[/]\n")
 
         # For each speaker, take their longest continuous segment (up to
         # SAMPLE_DURATION_SEC) and cut a sample out of it with ffmpeg — the
@@ -151,43 +154,46 @@ def main() -> int:
 
         speaker_list = sorted(speaker_samples.keys())
 
-        print("We'll now listen to a voice sample from each speaker, one by one.")
-        print("You can answer as soon as you recognize your own voice "
-              "(or just listen through all of them and choose at the end).\n")
+        console.print("We'll now listen to a voice sample from each speaker, one by one.")
+        console.print("You can answer as soon as you recognize your own voice "
+                       "(or just listen through all of them and choose at the end).\n")
 
         for idx, speaker in enumerate(speaker_list, start=1):
             path = speaker_samples[speaker]
-            print(f"[{idx}/{len(speaker_list)}] {speaker} -> {path}")
-            answer = input("    Enter — play, 's' — skip listening: ").strip().lower()
-            if answer != "s":
+            console.print(f"[bold]({idx}/{len(speaker_list)})[/] {speaker} -> [cyan]{escape(str(path))}[/]")
+            if Confirm.ask("    Play this sample?", default=True):
                 _play_audio(path)
-            print()
+            console.print()
 
-        print("Speaker samples:")
+        console.print("[bold cyan]Speaker samples:[/]")
         for idx, speaker in enumerate(speaker_list, start=1):
-            print(f"  {idx}. {speaker}  ({speaker_samples[speaker]})")
+            console.print(f"  {idx}. {speaker}  ([cyan]{escape(str(speaker_samples[speaker]))}[/])")
 
-        while True:
-            choice = input(f"\nWhich number is you? (1-{len(speaker_list)}, or 'r' to replay all): ").strip().lower()
-            if choice == "r":
-                for speaker in speaker_list:
-                    print(f"\n{speaker}:")
-                    _play_audio(speaker_samples[speaker])
-                continue
-            if choice.isdigit() and 1 <= int(choice) <= len(speaker_list):
-                chosen_speaker = speaker_list[int(choice) - 1]
-                break
-            print("Didn't understand that, please try again.")
+        choice = Prompt.ask(
+            f"\nWhich number is you? (1-{len(speaker_list)}, or 'r' to replay all)",
+            choices=[str(i) for i in range(1, len(speaker_list) + 1)] + ["r"],
+            show_choices=False,
+        )
+        while choice == "r":
+            for speaker in speaker_list:
+                console.print(f"\n[bold]{speaker}[/]:")
+                _play_audio(speaker_samples[speaker])
+            choice = Prompt.ask(
+                f"\nWhich number is you? (1-{len(speaker_list)}, or 'r' to replay all)",
+                choices=[str(i) for i in range(1, len(speaker_list) + 1)] + ["r"],
+                show_choices=False,
+            )
+        chosen_speaker = speaker_list[int(choice) - 1]
 
         reference_path = args.reference_dir / "my_reference.wav"
         args.reference_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(speaker_samples[chosen_speaker], reference_path)
 
-    print(f"\nDone! Reference sample saved: {reference_path}")
+    console.print(f"\n[bold green]Done![/] Reference sample saved: [cyan]{escape(str(reference_path))}[/]")
     if _running_in_container():
-        print(f"Now run:\n  ./run.sh <files> --reference {reference_path}")
+        console.print(f"Now run:\n  ./run.sh <files> --reference {escape(str(reference_path))}")
     else:
-        print(f"Now run:\n  python main.py <files> --reference {reference_path} --hf-token ...")
+        console.print(f"Now run:\n  python main.py <files> --reference {escape(str(reference_path))} --hf-token ...")
     return 0
 
 
