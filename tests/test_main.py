@@ -30,16 +30,59 @@ def test_print_dry_run_result_preserves_bracketed_filename(capsys):
             {
                 "file": "call [draft].webm",
                 "num_speakers": 2,
+                "num_speakers_mine": 1,
                 "num_segments_total": 40,
                 "num_segments_mine": 22,
                 "duration_mine_sec": 185.0,
                 "mine_share_pct": 61.0,
+                "threshold": 0.75,
             },
         ],
     })
 
     out = capsys.readouterr().out
     assert "call [draft].webm" in out
+
+
+def _dry_run_stats(**overrides) -> dict:
+    stats = {
+        "file": "call.webm",
+        "num_speakers": 2,
+        "num_speakers_mine": 1,
+        "num_segments_total": 40,
+        "num_segments_mine": 22,
+        "duration_mine_sec": 185.0,
+        "mine_share_pct": 61.0,
+        "threshold": 0.75,
+    }
+    stats.update(overrides)
+    return stats
+
+
+def test_dry_run_flags_when_more_than_one_speaker_matched(capsys):
+    """Exactly one speaker matching is the only healthy outcome — 2+ means
+    another person's speech joins yours in a document whose whole premise is
+    that it holds only yours."""
+    main._print_dry_run_result({"per_file": [_dry_run_stats(num_speakers_mine=2)]})
+
+    out = capsys.readouterr().out
+    assert "Speakers (you)" in out
+    assert "mixes another person's speech" in out
+
+
+def test_dry_run_flags_when_no_speaker_matched(capsys):
+    main._print_dry_run_result({"per_file": [_dry_run_stats(num_speakers_mine=0)]})
+
+    out = capsys.readouterr().out
+    assert "empty transcript" in out
+
+
+def test_dry_run_stays_quiet_when_exactly_one_speaker_matched(capsys):
+    main._print_dry_run_result({"per_file": [_dry_run_stats(num_speakers_mine=1)]})
+
+    out = capsys.readouterr().out
+    assert "mixes another person's speech" not in out
+    assert "empty transcript" not in out
 
 
 def test_print_full_result_preserves_bracketed_paths(capsys):

@@ -27,7 +27,9 @@ class FakeDiarizer:
         for seg in segments:
             sim = self._similarity_by_speaker[seg.speaker_label]
             result.append(IdentifiedSegment(start=seg.start, end=seg.end, is_me=sim >= effective_threshold, similarity=sim))
-        return result
+        # Mirrors the real signature: the threshold comes back out, because
+        # under auto-calibration only this call knows what it ended up being.
+        return result, effective_threshold
 
 
 def _make_input_and_wav(tmp_path: Path):
@@ -46,7 +48,7 @@ def test_threshold_change_updates_is_me_without_recomputing_identification(tmp_p
     segments = [Segment(start=0.0, end=1.0, speaker_label="SPEAKER_00")]
     diarizer = FakeDiarizer(segments, {"SPEAKER_00": 0.70})
 
-    _, identified, _ = _diarize_and_identify(
+    _, identified, _, _ = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.75,
         reference_fingerprint=ref_fp,
     )
@@ -55,7 +57,7 @@ def test_threshold_change_updates_is_me_without_recomputing_identification(tmp_p
 
     # Lower threshold on the SAME file/reference -> is_me flips to True,
     # without calling identify_my_segments again (similarity is reused from cache).
-    _, identified2, _ = _diarize_and_identify(
+    _, identified2, _, _ = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.6,
         reference_fingerprint=ref_fp,
     )
@@ -76,7 +78,7 @@ def test_cache_hit_auto_calibrates_when_threshold_not_given(tmp_path):
     diarizer = FakeDiarizer(segments, similarity)
 
     # First run (cache miss) with an explicit threshold to populate the cache.
-    _, identified, _ = _diarize_and_identify(
+    _, identified, _, _ = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.75,
         reference_fingerprint=ref_fp,
     )
@@ -86,7 +88,7 @@ def test_cache_hit_auto_calibrates_when_threshold_not_given(tmp_path):
     # Re-run with no --threshold at all (None) -> served from cache, but the
     # cache-hit branch must reconstruct per-speaker similarity and auto-calibrate,
     # rather than blindly comparing against a raw threshold=None.
-    _, identified2, _ = _diarize_and_identify(
+    _, identified2, _, _ = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=None,
         reference_fingerprint=ref_fp,
     )

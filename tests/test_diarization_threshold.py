@@ -1,5 +1,7 @@
 import logging
 
+import pytest
+
 from voxlib.diarization import DiarizationEngine, DEFAULT_THRESHOLD
 
 # _suggest_threshold_from_gap and resolve_threshold are @staticmethods with no
@@ -82,3 +84,57 @@ def test_resolve_threshold_falls_back_with_single_speaker(caplog):
 
     assert result == DEFAULT_THRESHOLD
     assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def _warnings(caplog) -> str:
+    return "\n".join(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+
+
+def test_warns_when_several_speakers_pass_the_threshold(caplog):
+    """
+    "Is this speaker me" is decided per speaker independently, so two people
+    can clear the same bar — and gap-based calibration makes it easy, since
+    the biggest gap can sit between speakers 2 and 3. The result is someone
+    else's sentences in a document that's supposed to hold only yours.
+    """
+    caplog.set_level(logging.INFO)
+    # Biggest gap is between B (0.70) and C (0.10), so the auto threshold
+    # (~0.40) admits BOTH A and B.
+    result = DiarizationEngine.resolve_threshold(
+        {"A": 0.85, "B": 0.70, "C": 0.10}, explicit_threshold=None
+    )
+
+    assert result == pytest.approx(0.40)
+    warning = _warnings(caplog)
+    assert "2 speakers passed" in warning
+    assert "A=0.85" in warning and "B=0.70" in warning
+    # Points at the value that would fix it: just above the runner-up.
+    assert "0.70" in warning
+
+
+def test_warns_when_no_speaker_passes_the_threshold(caplog):
+    caplog.set_level(logging.INFO)
+    result = DiarizationEngine.resolve_threshold({"A": 0.20, "B": 0.10}, explicit_threshold=0.9)
+
+    assert result == 0.9
+    warning = _warnings(caplog)
+    assert "No speaker passed" in warning
+    assert "empty transcript" in warning
+
+
+def test_no_ambiguity_warning_for_a_clean_single_match(caplog):
+    caplog.set_level(logging.INFO)
+    DiarizationEngine.resolve_threshold({"A": 0.85, "B": 0.10}, explicit_threshold=0.5)
+
+    warning = _warnings(caplog)
+    assert "passed the threshold" not in warning
+
+
+def test_ambiguity_warning_also_fires_for_an_explicit_threshold(caplog):
+    # The check lives at resolve_threshold's single exit point precisely so it
+    # covers explicitly-passed thresholds and the pipeline's cache-hit path
+    # too, not just fresh auto-calibration.
+    caplog.set_level(logging.INFO)
+    DiarizationEngine.resolve_threshold({"A": 0.85, "B": 0.80}, explicit_threshold=0.5)
+
+    assert "2 speakers passed" in _warnings(caplog)

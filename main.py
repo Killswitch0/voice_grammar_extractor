@@ -193,15 +193,29 @@ def _print_dry_run_result(result: dict) -> None:
 
     table = Table(show_edge=True)
     table.add_column("File")
-    table.add_column("Speakers", justify="right")
+    # Merged rather than given a column of its own: a separate column pushed
+    # the table past a standard terminal width and started truncating file
+    # names, which are the one thing you need to read to act on this.
+    table.add_column("Speakers (you)", justify="right")
     table.add_column("Your lines", justify="right")
     table.add_column("Your speech", justify="right")
     table.add_column("Share", justify="right")
+
+    ambiguous = False
     for s in result["per_file"]:
         mins_mine = s["duration_mine_sec"] / 60
+        # The whole point of the document is that it holds one person's speech.
+        # 0 speakers matched means an empty transcript; 2+ means someone else's
+        # sentences mixed into yours. Both are worth colouring, because both
+        # are cheap to fix here and expensive to notice later.
+        matched = s["num_speakers_mine"]
+        speakers_cell = f"{s['num_speakers']} ({matched})"
+        if matched != 1:
+            ambiguous = True
+            speakers_cell = f"[bold red]{speakers_cell}[/]"
         table.add_row(
             escape(s["file"]),
-            str(s["num_speakers"]),
+            speakers_cell,
             f"{s['num_segments_mine']}/{s['num_segments_total']}",
             f"~{mins_mine:.1f} min",
             f"[bold]{s['mine_share_pct']:.0f}%[/]",
@@ -209,6 +223,14 @@ def _print_dry_run_result(result: dict) -> None:
     console.print(table)
 
     console.print()
+    if ambiguous:
+        console.print(
+            "[bold red]Check the bracketed number in 'Speakers (you)' above[/] — that's how many "
+            "speakers were matched as you, and anything other than 1 means the split is wrong: "
+            "0 would give you an empty transcript, 2+ mixes another person's speech into yours. "
+            "Adjust [bold]--threshold[/] before running the full processing."
+        )
+        console.print()
     console.print("If the numbers look off — adjust [bold]--threshold[/] and try [bold]--dry-run[/] again.")
     console.print("Once you're happy with it — drop --dry-run and run the full processing.")
 

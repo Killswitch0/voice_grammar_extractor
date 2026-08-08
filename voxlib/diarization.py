@@ -105,12 +105,16 @@ class DiarizationEngine:
         reference_embedding: np.ndarray,
         threshold: float | None = None,
         min_segment_duration: float = 0.3,
-    ) -> list[IdentifiedSegment]:
+    ) -> tuple[list[IdentifiedSegment], float]:
         """
         For each unique speaker_label, computes an average embedding across all
         of that speaker's segments (more robust than a single short clip),
         compares it to the reference, and marks all of that speaker's segments
         as "mine" or not.
+
+        Returns the segments together with the threshold that was actually
+        applied — with auto-calibration that value is only decided in here,
+        and callers need it to report what the run did (see --dry-run).
         """
         by_speaker: dict[str, list[Segment]] = {}
         for seg in segments:
@@ -148,7 +152,7 @@ class DiarizationEngine:
                     similarity=sim,
                 )
             )
-        return result
+        return result, effective_threshold
 
     @staticmethod
     def _suggest_threshold_from_gap(speaker_similarity: dict[str, float]) -> tuple[float, float] | None:
@@ -167,6 +171,43 @@ class DiarizationEngine:
         biggest_gap, idx = max(gaps)
         suggested = (values[idx] + values[idx + 1]) / 2
         return suggested, biggest_gap
+
+    @staticmethod
+    def _warn_on_ambiguous_match(speaker_similarity: dict[str, float], threshold: float) -> None:
+        """
+        Whether a speaker is "me" is decided per speaker, independently — so
+        nothing structurally stops two people from clearing the same bar, and
+        gap-based auto-calibration makes it easy: the biggest gap can fall
+        between speakers 2 and 3, putting BOTH speaker 1 and 2 above the
+        threshold. The result is someone else's sentences arriving in a
+        document whose entire premise is that it contains only yours, with
+        nothing in the output saying so. Hence a warning at the one place
+        every code path passes through.
+        """
+        matched = sorted(
+            (sp for sp, sim in speaker_similarity.items() if sim >= threshold),
+            key=lambda sp: speaker_similarity[sp],
+            reverse=True,
+        )
+
+        if not matched:
+            logger.warning(
+                "No speaker passed the threshold %.2f (best similarity to your reference voice "
+                "was %.2f) — this recording would produce an empty transcript. Either the "
+                "reference sample doesn't match this recording, or the threshold is too high: "
+                "lower --threshold, or re-cut the reference with identify_speaker.py.",
+                threshold, max(speaker_similarity.values(), default=-1.0),
+            )
+        elif len(matched) > 1:
+            logger.warning(
+                "%d speakers passed the threshold %.2f (%s) — all of them will be treated as "
+                "you, so someone else's speech will end up in your transcript. Raise "
+                "--threshold above %.2f to keep only the closest match, and check the result "
+                "with --dry-run first.",
+                len(matched), threshold,
+                ", ".join(f"{sp}={speaker_similarity[sp]:.2f}" for sp in matched),
+                speaker_similarity[matched[1]],
+            )
 
     @staticmethod
     def resolve_threshold(speaker_similarity: dict[str, float], explicit_threshold: float | None) -> float:
@@ -195,22 +236,27 @@ class DiarizationEngine:
                         "might separate you from the rest more precisely (currently using --threshold %.2f).",
                         gap, suggested, explicit_threshold,
                     )
-            return explicit_threshold
+            resolved = explicit_threshold
+        else:
+            top_similarity = max(speaker_similarity.values(), default=-1.0)
+            if gap_result is None or top_similarity < MIN_CONFIDENT_SIMILARITY:
+                logger.warning(
+                    "Could not confidently auto-calibrate a threshold (best similarity to the "
+                    "reference voice was %.2f) — falling back to the default %.2f. Pass --threshold "
+                    "explicitly if this misidentifies your lines.",
+                    top_similarity, DEFAULT_THRESHOLD,
+                )
+                resolved = DEFAULT_THRESHOLD
+            else:
+                suggested, _ = gap_result
+                logger.info(
+                    "Auto-selected threshold %.2f based on the gap in voice similarity to the "
+                    "reference (no --threshold given).",
+                    suggested,
+                )
+                resolved = suggested
 
-        top_similarity = max(speaker_similarity.values(), default=-1.0)
-        if gap_result is None or top_similarity < MIN_CONFIDENT_SIMILARITY:
-            logger.warning(
-                "Could not confidently auto-calibrate a threshold (best similarity to the "
-                "reference voice was %.2f) — falling back to the default %.2f. Pass --threshold "
-                "explicitly if this misidentifies your lines.",
-                top_similarity, DEFAULT_THRESHOLD,
-            )
-            return DEFAULT_THRESHOLD
-
-        suggested, _ = gap_result
-        logger.info(
-            "Auto-selected threshold %.2f based on the gap in voice similarity to the "
-            "reference (no --threshold given).",
-            suggested,
-        )
-        return suggested
+        # Single exit point on purpose: every caller (fresh identification and
+        # the cache-hit path in pipeline.py alike) gets the same sanity check.
+        DiarizationEngine._warn_on_ambiguous_match(speaker_similarity, resolved)
+        return resolved

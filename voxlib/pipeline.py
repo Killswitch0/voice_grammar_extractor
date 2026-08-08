@@ -73,8 +73,10 @@ def _diarize_and_identify(
     threshold: float | None,
     reference_fingerprint: dict | None = None,
     transcription_params: dict | None = None,
-) -> tuple[list[Segment], list[IdentifiedSegment], dict]:
-    """Step shared by dry-run and normal mode: diarization + identification, with caching."""
+) -> tuple[list[Segment], list[IdentifiedSegment], dict, float]:
+    """Step shared by dry-run and normal mode: diarization + identification,
+    with caching. The last element is the threshold actually applied — with
+    auto-calibration it differs per file, so it's reported, not assumed."""
     file_cache = cache.load_cache(
         cache_dir, file_path, mode="diarization",
         reference_fingerprint=reference_fingerprint, transcription_params=transcription_params,
@@ -117,7 +119,7 @@ def _diarize_and_identify(
             effective_threshold,
         )
     else:
-        identified = diarizer.identify_my_segments(
+        identified, effective_threshold = diarizer.identify_my_segments(
             wav_path, segments, reference_embedding, threshold=threshold
         )
         my_count = sum(1 for s in identified if s.is_me)
@@ -129,7 +131,7 @@ def _diarize_and_identify(
                 "transcription": file_cache.get("transcription", []),
             }, reference_fingerprint=reference_fingerprint, transcription_params=transcription_params)
 
-    return segments, identified, file_cache
+    return segments, identified, file_cache, effective_threshold
 
 
 def _filter_cached_transcription(
@@ -166,7 +168,7 @@ def _process_single_file(
     wav_path = extract_audio(file_path, tmp_dir)
 
     if use_diarization:
-        segments, identified, file_cache = _diarize_and_identify(
+        segments, identified, file_cache, _ = _diarize_and_identify(
             file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
             reference_fingerprint=reference_fingerprint, transcription_params=transcription_params,
         )
@@ -267,7 +269,7 @@ def _dry_run_stats_for_file(
     threshold: float | None,
     reference_fingerprint: dict | None = None,
 ) -> dict:
-    segments, identified, _ = _diarize_and_identify(
+    segments, identified, _, effective_threshold = _diarize_and_identify(
         file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
         reference_fingerprint=reference_fingerprint,
     )
@@ -276,14 +278,22 @@ def _dry_run_stats_for_file(
     my_segments = [s for s in identified if s.is_me]
     my_duration = sum(s.end - s.start for s in my_segments)
 
+    # identified is built one-for-one from segments (both when freshly computed
+    # and when restored from cache, where they're saved in the same payload),
+    # so zipping recovers which speakers the "mine" segments belong to —
+    # IdentifiedSegment itself doesn't carry the label.
+    my_speakers = {seg.speaker_label for seg, ident in zip(segments, identified) if ident.is_me}
+
     return {
         "file": file_path.name,
         "num_speakers": len(speakers),
+        "num_speakers_mine": len(my_speakers),
         "num_segments_total": len(segments),
         "num_segments_mine": len(my_segments),
         "duration_total_sec": total_duration,
         "duration_mine_sec": my_duration,
         "mine_share_pct": (my_duration / total_duration * 100) if total_duration > 0 else 0.0,
+        "threshold": effective_threshold,
     }
 
 
@@ -299,12 +309,27 @@ def _log_dry_run_summary(per_file_stats: list[dict]) -> None:
     logger.info("DRY RUN — diarization results without transcription:")
     for s in per_file_stats:
         logger.info(
-            "  %s: %d speakers, your lines=%d/%d, your speech=%s (%.0f%% of total speech in the file)",
-            s["file"], s["num_speakers"], s["num_segments_mine"], s["num_segments_total"],
+            "  %s: %d speakers (%d matched as you at threshold %.2f), your lines=%d/%d, "
+            "your speech=%s (%.0f%% of total speech in the file)",
+            s["file"], s["num_speakers"], s["num_speakers_mine"], s["threshold"],
+            s["num_segments_mine"], s["num_segments_total"],
             _format_hms(s["duration_mine_sec"]), s["mine_share_pct"],
         )
     total_mine = sum(s["duration_mine_sec"] for s in per_file_stats)
     logger.info("Total of your speech across all files: %s", _format_hms(total_mine))
+
+    # Auto-calibration runs per file, so a batch of recordings of the same
+    # people can end up split at different thresholds — which makes the files
+    # not directly comparable. Worth surfacing rather than leaving buried in
+    # the per-file lines above.
+    thresholds = {round(s["threshold"], 2) for s in per_file_stats}
+    if len(thresholds) > 1:
+        logger.warning(
+            "Threshold differed across files in this batch (%s) because it was auto-calibrated "
+            "per recording. Pass --threshold explicitly to split every file at the same point.",
+            ", ".join(f"{t:.2f}" for t in sorted(thresholds)),
+        )
+
     logger.info(
         "If the share of 'your' segments looks implausible — adjust --threshold "
         "and run --dry-run again before spending time on the full transcription."
