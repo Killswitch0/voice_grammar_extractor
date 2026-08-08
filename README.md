@@ -136,6 +136,21 @@ yours, and what share of the total speech in the file that is — without
 running whisper at all. If the numbers don't match your expectations, adjust
 `--threshold` and try again. Only move on to a full run once the split looks right.
 
+**The number to check first is the one in brackets under `Speakers (you)`** —
+that's how many speakers were matched as you, and it should always be exactly
+`1`:
+
+```
+┃ File                   ┃ Speakers (you) ┃ Your lines ┃ Your speech ┃ Share ┃
+│ part_01.webm           │          2 (1) │     78/140 │   ~18.4 min │   61% │
+│ interview [draft].webm │          3 (2) │    190/210 │   ~40.0 min │   92% │
+```
+
+The second row is wrong: two of the three speakers were matched as you, so
+another person's sentences would end up in your transcript. `0` is the other
+failure — you'd get an empty document. Anything other than `1` is printed in
+red with an explanation; raise or lower `--threshold` and re-check.
+
 ### If the recording is just you (solo, monologue, journal)
 
 No diarization needed — the whole file is treated as your speech:
@@ -163,7 +178,7 @@ python main.py monologue.mp4 --no-diarization -o output/
 
 ## Output
 
-Two files will appear in the output folder:
+Three files will appear in the output folder:
 
 - **`transcript_annotated.txt`** — with timestamps and the source file name, for your review:
   ```
@@ -179,9 +194,51 @@ Two files will appear in the output folder:
   > "Here's a list of my spoken lines in English. Analyze the grammar, find
   > the most frequently repeated mistakes, and group them by type."
 
+- **`fluency.json`** — the run's fluency measurement: hesitation fillers per
+  100 words, speaking rate, and (solo recordings only) pause statistics.
+  Measured by the pipeline rather than eyeballed off the transcript later, so
+  the value is reproducible and therefore actually comparable between
+  recordings. See "Fluency measurement" below.
+
 When it's done, a short stats summary is also printed to the console — number
-of lines, total duration of your speech, and an approximate word count — so
-you get a sense of the material's volume without opening the document.
+of lines, total duration of your speech, an approximate word count, and the
+fluency line — so you get a sense of the material's volume without opening the
+document.
+
+If a run extracts no lines at all, it fails with an explanation instead of
+writing two empty files over the previous run's output — an empty transcript is
+indistinguishable from "you said nothing" once it's been archived.
+
+## Fluency measurement
+
+Alongside the transcripts, every run measures:
+
+| Metric | Meaning |
+|---|---|
+| `fillers_per_100_words` | Hesitation sounds (`um`, `uh`, `erm`) per 100 words |
+| `words_per_minute` | Speaking rate across your own speech |
+| `median_pause_sec`, `long_pauses` | Gaps between your consecutive lines — **solo recordings only** |
+
+Two deliberate choices worth knowing about:
+
+- **`uh-huh` and `mm-hmm` are not counted as hesitation.** They're backchannel
+  agreement — the spoken equivalent of a nod — so counting them would say
+  something about how much you were listening, not how much you hesitated.
+  (`--remove-fillers` leaves them intact for the same reason.)
+- **Pause statistics are only reported for solo recordings.** In a recording
+  with other voices, the gap between two of your lines is mostly the other
+  person talking, so the number would mean something different from file to
+  file. It comes back blank rather than misleading.
+
+The filler rate is a **lower bound**: whisper discards many real hesitations
+before they reach the transcript, so treat it as "at least this much".
+
+An empty cell always means "not measured", never zero.
+
+If an `analysis/` folder exists next to `main.py` (it's this project's coaching
+workspace — see "Tracking progress over time" below), each run also appends its
+measurement to `analysis/fluency_history.csv`, append-only, so the trend
+accumulates on its own without anyone maintaining it by hand.
 
 ## Tracking progress over time with Claude Code
 
@@ -228,6 +285,14 @@ know", "I mean" — a regex can't reliably tell those apart from a fully
 meaningful use of the same word (e.g. "I **like** it" is not a filler), and
 for grammar analysis, the risk of accidentally breaking a real sentence is
 worse than leaving a few extra fillers in place.
+
+It also leaves `uh-huh` and `mm-hmm` alone: those are agreement, not
+hesitation, and stripping the `uh` out of `uh-huh` would leave `-huh` behind —
+a broken line invented by the tool in a document meant for grammar review.
+
+Note that using it makes the filler metric unmeasurable for that run (the
+sounds are gone before they can be counted) — the filler columns come back
+blank, and `words_per_minute` is unaffected.
 
 `--batch-size 8` enables faster-whisper's `BatchedInferencePipeline` — gives a
 noticeable speedup on long lines, especially on GPU. Off by default (regular
@@ -340,6 +405,17 @@ The code is designed for the current pyannote.audio 4.x branch.
   speech overlap.
 - The accuracy of identifying "your" voice depends on the quality of the
   reference sample: use a clean clip without music or background noise.
+- Nothing forces exactly one speaker to be recognized as you — each speaker is
+  compared against the reference independently, so two similar voices can both
+  clear the threshold. This is now reported rather than silent (a warning in
+  the log, and the `Speakers (you)` column in `--dry-run`), but you still have
+  to act on it by adjusting `--threshold`.
+- Without an explicit `--threshold`, the value is auto-calibrated **per file**,
+  so a batch of recordings can be split at different points. Pass
+  `--threshold` explicitly when you want a batch to be directly comparable;
+  the run warns when the auto-picked values differed.
+- The filler rate is a lower bound — whisper drops many hesitations before
+  they reach the transcript. Useful as a trend, not as an absolute figure.
 - Models (whisper, pyannote) are downloaded on first run — you need internet
   for that; after that, they work offline.
 - In `--no-diarization` mode (solo recording), the progress cache can't skip

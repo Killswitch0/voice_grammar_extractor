@@ -238,6 +238,57 @@ def test_each_files_extracted_wav_is_freed_before_the_batch_ends(tmp_path, monke
         assert not directory.exists()
 
 
+def test_fluency_is_measured_and_logged_by_the_run_itself(tmp_path, monkeypatch):
+    """The metric has to be produced by the run, not read off the finished
+    transcript afterwards — that's the only way it stays comparable between
+    sessions."""
+    import csv
+
+    output_dir = tmp_path / "output"
+    history = tmp_path / "analysis" / "fluency_history.csv"
+
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"fake recording bytes")
+
+    result = _run_solo_pipeline(
+        tmp_path, monkeypatch,
+        FakeSoloTranscriber([
+            TranscribedLine(start=0.0, end=30.0, text="uh " + " ".join(["word"] * 29)),
+            TranscribedLine(start=32.0, end=62.0, text=" ".join(["word"] * 30)),
+        ]),
+        input_path=input_file, output_dir=output_dir, fluency_log=history,
+    )
+
+    metrics = result["fluency"]
+    assert metrics.total_words == 60
+    assert metrics.words_per_minute == 60.0
+    assert metrics.filler_count == 1
+    assert metrics.median_pause_sec == 2.0
+
+    assert (output_dir / "fluency.json").exists()
+    row = next(iter(csv.DictReader(history.read_text(encoding="utf-8").splitlines())))
+    assert row["mode"] == "solo"
+    assert row["files"] == "1"
+    assert row["fillers_per_100_words"] == "1.67"
+
+
+def test_no_fluency_history_is_written_when_no_path_is_given(tmp_path, monkeypatch):
+    # The analysis/ workspace doesn't exist for anyone using the extractor on
+    # its own, and the run must not conjure one.
+    output_dir = tmp_path / "output"
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"fake recording bytes")
+
+    _run_solo_pipeline(
+        tmp_path, monkeypatch,
+        FakeSoloTranscriber([TranscribedLine(start=0.0, end=1.0, text="something")]),
+        input_path=input_file, output_dir=output_dir,
+    )
+
+    assert not (tmp_path / "analysis").exists()
+    assert (output_dir / "fluency.json").exists()
+
+
 def test_no_lines_message_distinguishes_no_match_from_no_speech():
     files = [Path("a.webm")]
 

@@ -46,6 +46,7 @@ Two stages:
 | 3. Identify | cosine similarity vs. your reference voice sample | "Which speaker is *me*?" |
 | 4. Transcribe | `faster-whisper` | "What did *my* segments actually say?" |
 | 5. Format | this tool | "Put it in chronological order, one line per line, plus a `[?]` marker on low-confidence lines" |
+| 6. Measure fluency | this tool | "How fast, how hesitant, how much pausing?" — written to `fluency.json` (see `voxlib/fluency.py`) |
 
 If it's just you talking (a journal, a monologue) — steps 2 and 3 are skipped
 entirely with `--no-diarization`, and step 4 runs on the whole file.
@@ -127,6 +128,15 @@ of your English improving (or not) over time.
   not a grammar mistake — mixing it into the mistake-pattern list would
   muddy both signals. It lives in its own line in `memory.md` and its own
   column in `scores_history.csv`.
+- **Fluency is measured by code, not read off the transcript.** A metric only
+  earns its place in a months-long trend if the same input always produces the
+  same number, and a judgment call re-made each session doesn't guarantee that
+  — the rule ("`uh-huh` is agreement, not hesitation, so it doesn't count")
+  has to live somewhere executable, not in prose inside each report.
+  `voxlib/fluency.py` owns it, `analysis/fluency_history.csv` accumulates it,
+  and the coaching side only reads. Where a number genuinely can't be
+  recovered — pauses in a diarized recording, where the gap between your lines
+  is the other person talking — it's left blank rather than estimated.
 - **`memory.md` is bounded on purpose** — entries only move into it after
   they've genuinely recurred, and long-resolved ones age out into
   `memory_archive.md` after 10+ sessions of silence. The file you actually

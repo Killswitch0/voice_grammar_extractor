@@ -22,7 +22,7 @@ from pathlib import Path
 
 from rich.markup import escape
 
-from . import cache
+from . import cache, fluency
 from .audio_utils import extract_audio, KNOWN_EXTENSIONS
 from .console import console
 from .diarization import DiarizationEngine, Segment, IdentifiedSegment
@@ -414,6 +414,7 @@ def run_pipeline(
     dry_run: bool = False,
     remove_fillers: bool = False,
     batch_size: int | None = None,
+    fluency_log: Path | None = None,
 ) -> dict:
     """
     Returns a dict with paths to the final files and stats:
@@ -567,6 +568,21 @@ def run_pipeline(
         logger.info("Split into %d parts in %s/parts/", len(part_paths), output_dir)
 
     result["stats"] = _compute_and_log_stats(all_lines)
+
+    # Fluency is measured here, from the timings, rather than being eyeballed
+    # off the finished transcript later — a number that's re-derived by hand
+    # every session isn't comparable across sessions, which is the only thing
+    # a fluency number is for. See voxlib/fluency.py.
+    mode = "diarization" if use_diarization else "solo"
+    processed_files = len(input_files) - len(failed_files)
+    metrics = fluency.compute_fluency(
+        all_lines, use_diarization=use_diarization, fillers_removed=remove_fillers,
+    )
+    logger.info("Fluency: %s", fluency.describe(metrics))
+    fluency.write_json(output_dir / "fluency.json", metrics, mode=mode, files=processed_files)
+    result["fluency"] = metrics
+    if fluency_log is not None:
+        fluency.append_history(fluency_log, metrics, mode=mode, files=processed_files)
 
     logger.info("Done. Total lines: %d", len(all_lines))
     logger.info("Annotated document: %s", annotated_path)

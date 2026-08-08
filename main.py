@@ -38,6 +38,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 from voxlib.console import configure_logging, console, print_error  # noqa: E402
 
 
+def _fluency_log_path() -> Path | None:
+    """
+    Where to append this run's fluency measurement, or None to skip it.
+
+    `analysis/` is this project's coaching workspace (memory.md, session
+    reports, score history) and is absent for anyone using the extractor on its
+    own — so the history file is only kept when that folder already exists,
+    rather than conjuring a directory nobody asked for. Resolved against the
+    script's own location, not the current directory, so it lands in the same
+    place whether you run `python main.py` from the project root or `./run.sh`
+    from anywhere.
+    """
+    candidate = Path(__file__).parent / "analysis"
+    return candidate / "fluency_history.csv" if candidate.is_dir() else None
+
+
 def _threshold_type(value: str) -> float:
     """argparse type= for --threshold: it's a cosine similarity (see
     DiarizationEngine.cosine_similarity), which is mathematically bounded to
@@ -249,6 +265,9 @@ def _print_full_result(result: dict) -> None:
             f"  Stats: {stats['total_lines']} lines, ~{mins:.1f} min of speech, "
             f"~{stats['total_words']} words"
         )
+    if result.get("fluency") is not None:
+        from voxlib.fluency import describe
+        console.print(f"  Fluency: {escape(describe(result['fluency']))}")
 
 
 def _print_failed_files(failed_files: list[dict]) -> None:
@@ -301,6 +320,7 @@ def main() -> int:
             dry_run=args.dry_run,
             remove_fillers=args.remove_fillers,
             batch_size=args.batch_size,
+            fluency_log=_fluency_log_path(),
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/]")

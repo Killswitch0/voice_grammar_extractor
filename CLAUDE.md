@@ -146,15 +146,35 @@ automatic").
 Filler-word frequency ("um", "uh", "erm") is a fluency signal, not a grammar
 mistake — track it separately, don't fold it into the mistake categories above.
 
-Count filler words in `analysis/sessions/YYYY-MM-DD.txt` and express as
-**fillers per 100 words** (`filler_count / total_word_count * 100`). Compare
-against the last few entries in `analysis/scores_history.csv` for the trend.
+**Don't count these by hand.** The pipeline measures them and writes
+`output/fluency.json` for the run, appending the same numbers to
+`analysis/fluency_history.csv` (see `voxlib/fluency.py`). Read the row for
+this session from there:
 
-**If this recording was processed with `--remove-fillers`,** the fillers are
-already stripped from the transcript before you ever see it — skip this
-measurement for this session and note in the session report that fluency
-tracking wasn't possible for this recording (don't report a rate of 0 as if
-it were real).
+- `fillers_per_100_words` — hesitation sounds per 100 words. "uh-huh" and
+  "mm-hmm" are backchannel agreement, not hesitation, and are deliberately
+  excluded, which is the same rule the earlier sessions applied by hand.
+  Treat the number as a **lower bound**: whisper drops many hesitations
+  before they ever reach the transcript.
+- `words_per_minute` — speaking rate across your own speech. Comparable
+  between solo and diarized recordings.
+- `median_pause_sec` / `long_pauses` — **solo recordings only.** Blank for
+  diarized ones, because there the gap between two of your lines is mostly
+  the other person's turn.
+
+Compare against the previous rows in `analysis/fluency_history.csv` for the
+trend. An empty cell means "not measured", never zero — if a metric is blank,
+say it wasn't measurable this session rather than reporting 0.
+
+If the file or the row is missing (an older recording processed before this
+existed, say), you may fall back to counting from
+`analysis/sessions/YYYY-MM-DD.txt` — but apply the same exclusions above, and
+say in the report that the number was derived by hand.
+
+**If this recording was processed with `--remove-fillers`,** the filler
+columns come back blank by design — the sounds were stripped before they could
+be counted. Note in the session report that filler tracking wasn't possible
+for this recording (`words_per_minute` is still valid).
 
 ## 5. Produce the session report
 
@@ -237,10 +257,17 @@ adding/updating/moving entries):
 ## 7. Append to `analysis/scores_history.csv`
 
 Add one row: `date,cefr,grammar_score,vocabulary_score,naturalness_score,fluency_score,filler_rate_per_100_words`.
-Use the same scores as the session report. Leave `filler_rate_per_100_words`
-empty if it couldn't be measured this session (step 4). This file is
-append-only — never rewrite past rows, even if a later session reassesses
-something differently; the point is a raw historical record for graphing later.
+Use the same scores as the session report. Copy
+`filler_rate_per_100_words` from this session's row in
+`analysis/fluency_history.csv` (step 4) rather than recomputing it, and leave
+it empty if it wasn't measurable. This file is append-only — never rewrite
+past rows, even if a later session reassesses something differently; the point
+is a raw historical record for graphing later.
+
+Note the division of labour between the two CSVs: `scores_history.csv` holds
+your judgment calls (CEFR, the four 0-10 scores) and you own it;
+`fluency_history.csv` is written by the pipeline and you only ever read it —
+don't edit or append to it by hand.
 
 ## 8. Report back in chat
 
@@ -501,7 +528,11 @@ output/                 transcript_clean.txt + transcript_annotated.txt (overwri
 analysis/
   memory.md              the persistent, cross-session tracker — read/update every session
   memory_archive.md      long-resolved mistakes, moved out of memory.md to keep it short
-  scores_history.csv     append-only numeric history (CEFR, 4 scores, filler rate) per session
+  scores_history.csv     append-only numeric history (CEFR, 4 scores, filler rate) per session —
+                           your assessments, written by you
+  fluency_history.csv    append-only, written by the PIPELINE, never by hand: filler rate,
+                           words per minute, pause stats per run (see voxlib/fluency.py).
+                           Read it in step 4; don't edit it.
   conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
                                tracks which memory.md patterns have been drilled in
                                dialogue, when, and on a spaced-repetition schedule
