@@ -1,0 +1,153 @@
+name: Deep checks
+
+# The checks that are too slow or too network-dependent to run on every push,
+# but that cover the things most likely to break silently: the pinned
+# dependency set, the pinned model revisions, and the accepted CVE.
+#
+# tests.yml stays fast and runs on everything; this runs weekly, on demand,
+# and whenever the pins themselves change.
+on:
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays, off the hour — GitHub's schedulers queue hard on :00
+  workflow_dispatch:
+  push:
+    paths:
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "voxlib/diarization.py"  # holds the pinned model revisions
+      - ".github/workflows/deep-checks.yml"
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "voxlib/diarization.py"
+      - ".github/workflows/deep-checks.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The only job that installs the real torch/pyannote/faster-whisper stack.
+  # requirements.txt documents a real incident where a mismatched
+  # torch/torchaudio pair broke diarization at runtime — and Dependabot
+  # proposes exactly those bumps every week. Without this, such a PR arrives
+  # green, because the fast job never installs them at all.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install the pinned dependency set
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      # The documented failure surfaced as an AttributeError on first use, not
+      # at install time, so resolving the versions proves nothing on its own.
+      - name: Import the stack
+        run: |
+          python - <<'PY'
+          import faster_whisper, pyannote.audio, torch, torchaudio
+          print("torch", torch.__version__, "| torchaudio", torchaudio.__version__)
+          print("pyannote.audio", pyannote.audio.__version__)
+          # The exact call that broke last time the pair was mismatched.
+          from pyannote.audio import Model, Pipeline  # noqa: F401
+          print("imports OK")
+          PY
+
+      - name: Run the slow end-to-end test
+        run: pytest -m slow -v
+
+  # The two pyannote models are loaded at fixed commits (see
+  # voxlib/diarization.py). If a pin stops resolving — repo moved, history
+  # rewritten — the app breaks at runtime on the user's machine, with nothing
+  # in CI having noticed. Metadata is public even though the models are gated,
+  # so this needs no HuggingFace token.
+  model-revisions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Check the pinned model revisions still resolve
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          import sys
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          # Read the constants without importing voxlib.diarization, which
+          # would drag in numpy and (on first use) torch.
+          source = Path("voxlib/diarization.py").read_text(encoding="utf-8")
+          tree = ast.parse(source)
+          constants = {
+              node.targets[0].id: node.value.value
+              for node in tree.body
+              if isinstance(node, ast.Assign)
+              and isinstance(node.targets[0], ast.Name)
+              and isinstance(node.value, ast.Constant)
+          }
+
+          pins = [
+              (constants["DIARIZATION_MODEL"], constants["DIARIZATION_REVISION"]),
+              (constants["EMBEDDING_MODEL"], constants["EMBEDDING_REVISION"]),
+          ]
+
+          failed = False
+          for repo, revision in pins:
+              url = f"https://huggingface.co/api/models/{repo}/revision/{revision}"
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as response:
+                      reported = json.load(response).get("sha")
+              except urllib.error.HTTPError as exc:
+                  print(f"FAIL {repo}@{revision[:8]} -> HTTP {exc.code}")
+                  failed = True
+                  continue
+              if reported != revision:
+                  print(f"FAIL {repo}@{revision[:8]} -> resolved to {reported}")
+                  failed = True
+              else:
+                  print(f"ok   {repo}@{revision[:8]}")
+
+          sys.exit(1 if failed else 0)
+          PY
+
+  # tests.yml suppresses PYSEC-2026-3624 with a written justification, because
+  # no fixed release of lightning exists yet. That suppression is the kind of
+  # thing that outlives its reason, so the unfiltered result gets reported here
+  # too — without failing the build, since there is still nothing to upgrade to.
+  audit-unfiltered:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Audit with no suppressions
+        run: pipx run pip-audit -r requirements.txt
