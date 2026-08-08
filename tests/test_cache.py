@@ -40,7 +40,39 @@ def test_save_cache_leaves_no_tmp_file_behind(tmp_path: Path):
     cache.save_cache(cache_dir, input_file, mode="diarization", cache_data=EMPTY)
 
     assert list(cache_dir.glob("*.tmp")) == []
-    assert (cache_dir / "rec.json").exists()
+    # The exact file name is cache.py's business (it carries a path hash, see
+    # _cache_path) — what matters here is that exactly one cache file landed
+    # and no temp file was left next to it.
+    written = list(cache_dir.glob("*.json"))
+    assert len(written) == 1
+    assert written[0].stem.startswith("rec_")
+
+
+def test_same_stem_with_different_extensions_do_not_share_a_cache_file(tmp_path: Path):
+    """
+    `part_01.webm` and `part_01.m4a` in one folder used to map onto a single
+    `part_01.json`. Because each one's fingerprint check then failed against
+    the other's, they took turns resetting each other's diarization on every
+    run — the most expensive step, silently redone forever.
+    """
+    cache_dir = tmp_path / ".cache"
+    webm = tmp_path / "part_01.webm"
+    webm.write_bytes(b"webm audio")
+    m4a = tmp_path / "part_01.m4a"
+    m4a.write_bytes(b"m4a audio, a different length entirely")
+
+    webm_data = {"diarization": [{"start": 0.0, "end": 1.0, "speaker_label": "SPEAKER_00"}],
+                 "identification": None, "transcription": []}
+    m4a_data = {"diarization": [{"start": 5.0, "end": 6.0, "speaker_label": "SPEAKER_01"}],
+                "identification": None, "transcription": []}
+
+    cache.save_cache(cache_dir, webm, mode="diarization", cache_data=webm_data)
+    cache.save_cache(cache_dir, m4a, mode="diarization", cache_data=m4a_data)
+
+    assert len(list(cache_dir.glob("*.json"))) == 2
+    # Neither write clobbered the other, and neither read is treated as stale.
+    assert cache.load_cache(cache_dir, webm, mode="diarization")["diarization"] == webm_data["diarization"]
+    assert cache.load_cache(cache_dir, m4a, mode="diarization")["diarization"] == m4a_data["diarization"]
 
 
 def test_cache_is_invalidated_when_input_file_changes(tmp_path: Path):

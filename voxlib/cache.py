@@ -25,6 +25,7 @@ file you've already processed would silently keep using stale results.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import asdict
@@ -35,7 +36,18 @@ logger = logging.getLogger(__name__)
 
 
 def _cache_path(cache_dir: Path, input_file: Path) -> Path:
-    return cache_dir / f"{input_file.stem}.json"
+    """
+    Cache file name for an input recording.
+
+    The stem alone is not unique: `part_01.webm` and `part_01.m4a` sitting in
+    the same folder would share one cache file, and since each one's
+    fingerprint check fails against the other's, they'd take turns wiping each
+    other's diarization on every run. Appending a short hash of the full
+    resolved path keeps the name readable while making it actually identify
+    one file.
+    """
+    digest = hashlib.sha1(str(input_file.resolve()).encode("utf-8")).hexdigest()[:8]
+    return cache_dir / f"{input_file.stem}_{digest}.json"
 
 
 def file_fingerprint(path: Path) -> dict:

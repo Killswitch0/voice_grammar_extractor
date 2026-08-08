@@ -241,6 +241,15 @@ def _process_single_file(
                 "transcription": cached_transcription_dicts,
             }, transcription_params=transcription_params)
 
+    # Cached lines and newly transcribed ones are two separate streams, and
+    # concatenating them is only chronological by accident — when the cache
+    # happens to hold a prefix of the file (the resume-after-crash case).
+    # Change --threshold on an already-processed file and segments from the
+    # MIDDLE of the recording become "mine" for the first time, landing after
+    # lines that come later in the audio. Sorting here is what actually
+    # guarantees the documents read in the order the words were spoken.
+    all_lines.sort(key=lambda line: (line.start, line.end))
+
     if remove_fillers:
         for line in all_lines:
             line.text = _remove_fillers(line.text)
@@ -323,6 +332,47 @@ def _compute_and_log_stats(all_lines: list[SourcedLine]) -> dict:
     return stats
 
 
+def _no_lines_message(
+    input_files: list[Path],
+    failed_files: list[dict],
+    use_diarization: bool,
+) -> str:
+    """The error text for a run that produced nothing. Which advice actually
+    helps depends on WHY there's nothing: every file crashing is a different
+    problem from every file being processed fine but yielding no line of
+    yours, and the second one is specific to diarization."""
+    lines = [
+        f"Not a single line was extracted from {len(input_files)} file(s) — "
+        f"the existing documents were left untouched (nothing was overwritten).",
+    ]
+
+    if len(failed_files) == len(input_files):
+        lines.append("")
+        lines.append("Every file failed to process:")
+        lines.extend(f"  - {f['file']}: {f['error']}" for f in failed_files)
+    else:
+        if failed_files:
+            lines.append("")
+            lines.append(f"{len(failed_files)} of them failed to process:")
+            lines.extend(f"  - {f['file']}: {f['error']}" for f in failed_files)
+        lines.append("")
+        if use_diarization:
+            lines.append(
+                "The rest were processed, but no segment was recognized as your voice. "
+                "Most likely the threshold is too high or the reference sample doesn't "
+                "match this recording — run again with --dry-run to see the per-speaker "
+                "split, then adjust --threshold."
+            )
+        else:
+            lines.append(
+                "The rest were processed, but no speech was recognized in them at all. "
+                "Check that the recording actually contains audible speech, and that "
+                "--language matches the language spoken."
+            )
+
+    return "\n".join(lines)
+
+
 def run_pipeline(
     input_path: Path,
     reference_voice: Path | None,
@@ -364,8 +414,14 @@ def run_pipeline(
         "whisper_model": whisper_model, "language": language, "batch_size": batch_size,
     }
 
-    with tempfile.TemporaryDirectory(prefix="voice_extractor_") as tmp_dir_str:
-        tmp_dir = Path(tmp_dir_str)
+    # Only the reference sample lives here for the whole run. Each recording
+    # gets its own short-lived directory instead (see the loops below): a
+    # decoded WAV is ~115 MB per hour of audio, so keeping every file's copy
+    # around until the batch finishes would pile up gigabytes for no reason —
+    # and two inputs sharing a stem would extract onto each other's path,
+    # including onto the reference sample itself.
+    with tempfile.TemporaryDirectory(prefix="voice_extractor_ref_") as ref_tmp_dir_str:
+        ref_tmp_dir = Path(ref_tmp_dir_str)
 
         diarizer = None
         reference_embedding = None
@@ -385,7 +441,7 @@ def run_pipeline(
             reference_fingerprint = cache.file_fingerprint(reference_voice)
 
             logger.info("Extracting audio from the reference sample and computing its embedding...")
-            ref_wav = extract_audio(reference_voice, tmp_dir)
+            ref_wav = extract_audio(reference_voice, ref_tmp_dir)
             reference_embedding = diarizer.compute_embedding(ref_wav)
         elif dry_run:
             raise ValueError(
@@ -400,11 +456,12 @@ def run_pipeline(
                     console.rule(escape(file_path.name))
                 logger.info("=== Dry run: %s ===", file_path.name)
                 try:
-                    wav_path = extract_audio(file_path, tmp_dir)
-                    stats = _dry_run_stats_for_file(
-                        file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
-                        reference_fingerprint=reference_fingerprint,
-                    )
+                    with tempfile.TemporaryDirectory(prefix="voice_extractor_file_") as file_tmp:
+                        wav_path = extract_audio(file_path, Path(file_tmp))
+                        stats = _dry_run_stats_for_file(
+                            file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
+                            reference_fingerprint=reference_fingerprint,
+                        )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Failed to process %s: %s", file_path.name, exc)
                     failed_files.append({"file": file_path.name, "error": str(exc)})
@@ -425,21 +482,22 @@ def run_pipeline(
                 console.rule(escape(file_path.name))
             logger.info("=== Processing: %s ===", file_path.name)
             try:
-                transcribed = _process_single_file(
-                    file_path=file_path,
-                    tmp_dir=tmp_dir,
-                    cache_dir=cache_dir,
-                    use_cache=use_cache,
-                    use_diarization=use_diarization,
-                    diarizer=diarizer,
-                    reference_embedding=reference_embedding,
-                    transcriber=transcriber,
-                    language=language,
-                    threshold=threshold,
-                    remove_fillers=remove_fillers,
-                    reference_fingerprint=reference_fingerprint,
-                    transcription_params=transcription_params,
-                )
+                with tempfile.TemporaryDirectory(prefix="voice_extractor_file_") as file_tmp:
+                    transcribed = _process_single_file(
+                        file_path=file_path,
+                        tmp_dir=Path(file_tmp),
+                        cache_dir=cache_dir,
+                        use_cache=use_cache,
+                        use_diarization=use_diarization,
+                        diarizer=diarizer,
+                        reference_embedding=reference_embedding,
+                        transcriber=transcriber,
+                        language=language,
+                        threshold=threshold,
+                        remove_fillers=remove_fillers,
+                        reference_fingerprint=reference_fingerprint,
+                        transcription_params=transcription_params,
+                    )
             except Exception as exc:  # noqa: BLE001
                 # A per-file failure (corrupt recording, unsupported codec, a
                 # transient model error) shouldn't cost the output for every
@@ -460,6 +518,13 @@ def run_pipeline(
                         avg_logprob=line.avg_logprob,
                     )
                 )
+
+    if not all_lines:
+        # Writing here would truncate the previous run's documents to nothing.
+        # Those documents are the input to the whole analysis workflow, and an
+        # empty transcript is indistinguishable from "you said nothing" once
+        # it's been archived — so refuse instead, and leave what's on disk alone.
+        raise RuntimeError(_no_lines_message(input_files, failed_files, use_diarization))
 
     annotated_path = output_dir / "transcript_annotated.txt"
     clean_path = output_dir / "transcript_clean.txt"

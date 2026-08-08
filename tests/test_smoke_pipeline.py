@@ -43,21 +43,39 @@ def _write_sine_wav(path: Path, duration_sec: float = 2.0, sample_rate: int = 16
 
 
 def test_pipeline_runs_end_to_end_without_diarization(tmp_path):
+    """
+    Whisper's behavior on a non-speech tone is genuinely undefined: it may
+    hallucinate a stray phrase or return nothing at all, and which one happens
+    varies by model version. Both are correct pipeline outcomes, so this
+    asserts the pair of them rather than picking one and becoming flaky:
+
+      - lines came out  -> the documents exist and are well-formed
+      - nothing came out -> the pipeline refuses to write empty documents
+                            over whatever was there before
+
+    What it's really guarding is that extract -> decode -> transcribe -> write
+    holds together against the real libraries after a dependency bump.
+    """
     from voxlib.pipeline import run_pipeline
 
     input_wav = tmp_path / "sample.wav"
     _write_sine_wav(input_wav)
     output_dir = tmp_path / "output"
 
-    result = run_pipeline(
-        input_path=input_wav,
-        reference_voice=None,
-        output_dir=output_dir,
-        hf_token=None,
-        whisper_model="tiny",
-        use_diarization=False,
-        use_cache=False,
-    )
+    try:
+        result = run_pipeline(
+            input_path=input_wav,
+            reference_voice=None,
+            output_dir=output_dir,
+            hf_token=None,
+            whisper_model="tiny",
+            use_diarization=False,
+            use_cache=False,
+        )
+    except RuntimeError as exc:
+        assert "Not a single line was extracted" in str(exc)
+        assert not (output_dir / "transcript_clean.txt").exists()
+        return
 
     assert result["annotated"].exists()
     assert result["clean"].exists()
