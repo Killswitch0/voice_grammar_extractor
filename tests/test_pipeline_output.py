@@ -289,6 +289,97 @@ def test_no_fluency_history_is_written_when_no_path_is_given(tmp_path, monkeypat
     assert (output_dir / "fluency.json").exists()
 
 
+def test_collect_input_files_accepts_a_single_file(tmp_path):
+    f = tmp_path / "one.webm"
+    f.write_bytes(b"x")
+    assert pipeline.collect_input_files(f) == [f]
+
+
+def test_collect_input_files_sorts_and_filters_a_folder(tmp_path):
+    for name in ["b.webm", "a.mp4", "c.wav", "notes.txt", "cover.jpg"]:
+        (tmp_path / name).write_bytes(b"x")
+    (tmp_path / "nested").mkdir()
+
+    found = pipeline.collect_input_files(tmp_path)
+
+    # Sorted, so batch order (and therefore the order of the final document)
+    # doesn't depend on the filesystem's iteration order.
+    assert [p.name for p in found] == ["a.mp4", "b.webm", "c.wav"]
+
+
+def test_collect_input_files_is_case_insensitive_about_extensions(tmp_path):
+    (tmp_path / "LOUD.WEBM").write_bytes(b"x")
+    assert [p.name for p in pipeline.collect_input_files(tmp_path)] == ["LOUD.WEBM"]
+
+
+def test_collect_input_files_rejects_an_empty_folder(tmp_path):
+    (tmp_path / "readme.txt").write_bytes(b"x")
+    with pytest.raises(FileNotFoundError, match="No supported audio/video files"):
+        pipeline.collect_input_files(tmp_path)
+
+
+def test_collect_input_files_rejects_a_missing_path(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Path not found"):
+        pipeline.collect_input_files(tmp_path / "nope.webm")
+
+
+class FakeDiarizationEngine:
+    """Stands in for the pyannote-backed engine across a whole run_pipeline call."""
+
+    def __init__(self, segments, similarity_by_speaker):
+        self._inner = FakeDiarizer(segments, similarity_by_speaker)
+
+    def compute_embedding(self, wav_path, start=None, end=None):
+        return object()
+
+    def diarize(self, wav_path):
+        return self._inner.diarize(wav_path)
+
+    def identify_my_segments(self, wav_path, segments, reference_embedding, threshold=None):
+        return self._inner.identify_my_segments(wav_path, segments, reference_embedding, threshold)
+
+
+def test_diarized_run_writes_only_my_lines_end_to_end(tmp_path, monkeypatch):
+    """
+    The diarization branch of run_pipeline had no end-to-end coverage at all —
+    only its pieces did. This walks the whole path: reference embedding,
+    diarization, identification, transcription, documents.
+    """
+    output_dir = tmp_path / "output"
+    input_file = tmp_path / "call.webm"
+    input_file.write_bytes(b"fake recording bytes")
+    reference = tmp_path / "me.wav"
+    reference.write_bytes(b"fake reference bytes")
+
+    segments = [
+        Segment(start=0.0, end=2.0, speaker_label="SPEAKER_00"),   # mine
+        Segment(start=2.0, end=4.0, speaker_label="SPEAKER_01"),   # someone else
+        Segment(start=4.0, end=6.0, speaker_label="SPEAKER_00"),   # mine
+    ]
+    engine = FakeDiarizationEngine(segments, {"SPEAKER_00": 0.90, "SPEAKER_01": 0.20})
+
+    monkeypatch.setattr(pipeline, "extract_audio", _fake_extract_audio)
+    monkeypatch.setattr(pipeline, "DiarizationEngine", lambda **_: engine)
+    monkeypatch.setattr(pipeline, "Transcriber", lambda **_: FakeSegmentTranscriber())
+
+    result = pipeline.run_pipeline(
+        input_path=input_file,
+        reference_voice=reference,
+        output_dir=output_dir,
+        hf_token="hf_fake",
+        threshold=0.75,
+        use_diarization=True,
+        use_cache=False,
+    )
+
+    clean = (output_dir / "transcript_clean.txt").read_text(encoding="utf-8").splitlines()
+    assert clean == ["line at 0s", "line at 4s"]  # the other speaker's turn is absent
+    assert result["stats"]["total_lines"] == 2
+    # Pause stats stay blank for diarized recordings, where a gap between my
+    # lines is mostly the other person talking.
+    assert result["fluency"].median_pause_sec is None
+
+
 def test_no_lines_message_distinguishes_no_match_from_no_speech():
     files = [Path("a.webm")]
 
