@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from voxlib.console import configure_logging, console, print_error  # noqa: E402
 from voxlib import validation  # noqa: E402
+from voxlib.diarization import DEFAULT_MERGE_GAP_SEC  # noqa: E402
 
 
 def _fluency_log_path() -> Path | None:
@@ -151,6 +152,15 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
         action="store_true",
         default=config_defaults.get("no_diarization", False),
         help="Disable speaker separation: the whole file is treated as your solo speech.",
+    )
+    parser.add_argument(
+        "--merge-gap",
+        type=_checked(validation.non_negative_float, "--merge-gap"),
+        default=config_defaults.get("merge_gap", DEFAULT_MERGE_GAP_SEC),
+        help=f"Stitch consecutive turns by the same speaker back together when less than this "
+             f"many seconds apart (default: {DEFAULT_MERGE_GAP_SEC}). Diarization cuts at every "
+             f"pause, including mid-sentence ones, and whisper recognizes a whole phrase far "
+             f"better than the fragments. Use 0 to keep the raw segments.",
     )
     parser.add_argument(
         "--no-cache",
@@ -332,6 +342,7 @@ def main() -> int:
             remove_fillers=args.remove_fillers,
             batch_size=args.batch_size,
             fluency_log=_fluency_log_path(),
+            merge_gap=args.merge_gap,
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/]")

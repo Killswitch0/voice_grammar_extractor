@@ -165,6 +165,7 @@ python main.py monologue.mp4 --no-diarization -o output/
 | `--language en` | Speech language for recognition (default `en`). `--language auto` — detect it once per file (for mixed-language speech) |
 | `--whisper-model medium` | Recognition quality: `tiny` < `base` < `small` < `medium` < `large-v3`. Bigger = more accurate but slower |
 | `--threshold 0.8` | Voice similarity threshold. If omitted, it's auto-calibrated per recording; pass it explicitly to override — raise it if the system confuses you with others, lower it if it misses your lines |
+| `--merge-gap 0.8` | Stitch consecutive turns by the same speaker back together when less than this many seconds apart (see "Why segments get merged" below). `0` keeps diarization's raw output |
 | `--device cuda` | Use GPU, if available |
 | `-v` | Verbose logging |
 | `--config path.yaml` | Take settings from a YAML file instead of a long list of flags (see `config.example.yaml`) |
@@ -208,6 +209,29 @@ document.
 If a run extracts no lines at all, it fails with an explanation instead of
 writing two empty files over the previous run's output — an empty transcript is
 indistinguishable from "you said nothing" once it's been archived.
+
+## Why segments get merged
+
+Diarization answers "who is speaking when", and it cuts wherever a voice
+stops — including the pauses inside a sentence. Left alone, that hands whisper
+one or two seconds of audio at a time, with no surrounding words to work from,
+and it recognizes fragments distinctly worse than whole phrases.
+
+The damage compounds. Poorly recognized lines get the `[?]` marker and are
+excluded from grammar analysis, so the fragmentation quietly shrinks how much
+of your speech is reviewable at all. And a fragment can't be judged
+grammatically even when it *was* recognized correctly — "So, and I just..." has
+no verifiable grammar in it, and a mistake spanning the cut is invisible to
+both halves.
+
+So consecutive turns by the same speaker less than `--merge-gap` seconds apart
+(default 0.8) are stitched back together before transcription. A turn by
+someone else in between always blocks the merge, so this never mixes two
+people into one line. Merging stops at 30 seconds, which is whisper's own
+window size.
+
+The raw segments are what gets cached, so you can retune `--merge-gap` and
+re-run without paying for diarization again.
 
 ## Fluency measurement
 

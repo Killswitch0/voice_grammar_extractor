@@ -24,32 +24,37 @@ Two stages:
 ## Stage 1 — Extraction pipeline
 
 ```
- ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
- │  Video/Audio │ ──> │   Extract    │ ──> │   Diarize    │ ──> │  Identify    │ ──> │  Transcribe  │ ──> │   Format     │
- │  (any format)│     │   Audio      │     │ "who spoke   │     │  "which one  │     │  only YOUR   │     │  chronologi- │
- │              │     │  (ffmpeg)    │     │  when"       │     │  voice is    │     │   lines      │     │  cal order + │
- │              │     │              │     │ (pyannote)   │     │   yours"     │     │  (whisper)   │     │  [?] markers │
- └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────┬───────┘
-                                                                                                                 │
-                                                                                                                 v
-                                                                                                       ┌───────────────────┐
-                                                                                                       │ transcript_clean  │
-                                                                                                       │ transcript_annot- │
-                                                                                                       │ ated (with [?])   │
-                                                                                                       └───────────────────┘
+ ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+ │  Video/Audio │ ──> │   Extract    │ ──> │   Diarize    │ ──> │    Merge     │
+ │  (any format)│     │   Audio      │     │ "who spoke   │     │  same-speaker│
+ │              │     │  (ffmpeg)    │     │  when"       │     │  fragments   │
+ │              │     │              │     │ (pyannote)   │     │  back into   │
+ │              │     │              │     │              │     │  phrases     │
+ └──────────────┘     └──────────────┘     └──────────────┘     └──────┬───────┘
+                                                                       │
+        ┌──────────────────────────────────────────────────────────────┘
+        v
+ ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌───────────────────┐
+ │  Identify    │ ──> │  Transcribe  │ ──> │   Format     │ ──> │ transcript_clean  │
+ │  "which one  │     │  only YOUR   │     │  chronologi- │     │ transcript_annot- │
+ │  voice is    │     │   lines      │     │  cal order + │     │ ated (with [?])   │
+ │   yours"     │     │  (whisper)   │     │  [?] markers │     │ fluency.json      │
+ └──────────────┘     └──────────────┘     └──────────────┘     └───────────────────┘
 ```
 
 | Step | Tool | What it answers |
 |---|---|---|
 | 1. Extract audio | `ffmpeg` | "Turn any video/audio container into a clean waveform" |
 | 2. Diarize | `pyannote.audio` | "At each moment, who is speaking?" (only if other voices are present) |
-| 3. Identify | cosine similarity vs. your reference voice sample | "Which speaker is *me*?" |
-| 4. Transcribe | `faster-whisper` | "What did *my* segments actually say?" |
-| 5. Format | this tool | "Put it in chronological order, one line per line, plus a `[?]` marker on low-confidence lines" |
-| 6. Measure fluency | this tool | "How fast, how hesitant, how much pausing?" — written to `fluency.json` (see `voxlib/fluency.py`) |
+| 3. Merge segments | this tool | "Which of those cuts were mid-sentence pauses rather than real turn boundaries?" |
+| 4. Identify | cosine similarity vs. your reference voice sample | "Which speaker is *me*?" |
+| 5. Transcribe | `faster-whisper` | "What did *my* segments actually say?" |
+| 6. Format | this tool | "Put it in chronological order, one line per line, plus a `[?]` marker on low-confidence lines" |
+| 7. Measure fluency | this tool | "How fast, how hesitant, how much pausing?" — written to `fluency.json` (see `voxlib/fluency.py`) |
 
-If it's just you talking (a journal, a monologue) — steps 2 and 3 are skipped
-entirely with `--no-diarization`, and step 4 runs on the whole file.
+If it's just you talking (a journal, a monologue) — steps 2 through 4 are
+skipped entirely with `--no-diarization`, and transcription runs on the whole
+file, where whisper does its own splitting by pauses.
 
 ## Stage 2 — Coaching memory (Claude Code + `CLAUDE.md`)
 
@@ -98,6 +103,14 @@ of your English improving (or not) over time.
   pyannote renames speakers (`SPEAKER_00`, `SPEAKER_01`, ...) independently
   in every file. Matching by *voice similarity* to a saved reference is the
   only way to reliably say "this one is you" across many different recordings.
+- **Diarization's cuts are not sentence boundaries** — it splits wherever a
+  voice stops, mid-sentence pauses included, and whisper is markedly worse on
+  a two-second fragment than on a whole phrase: it has no surrounding words to
+  condition on. Worse, a fragment carries no judgeable grammar even when it's
+  recognized perfectly, and a mistake spanning the cut is invisible to both
+  halves. So same-speaker turns closer than `--merge-gap` are stitched back
+  together first. The raw segments stay in the cache, so the gap can be
+  retuned without re-running the model.
 - **Nothing is sent to any AI automatically** — extraction only *prepares*
   the text. What happens with it next is a separate, deliberate step.
 - **Whisper doesn't grade grammar** — it predicts the most likely words for

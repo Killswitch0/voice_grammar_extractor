@@ -27,6 +27,7 @@ ALLOWED_KEYS = {
     "low_confidence_threshold",
     "remove_fillers",
     "batch_size",
+    "merge_gap",
     "log_file",
 }
 
@@ -59,6 +60,7 @@ def load_config(config_path: Path) -> dict[str, Any]:
         ("low_confidence_threshold", validation.logprob_threshold),
         ("split_chars", validation.positive_int),
         ("batch_size", validation.positive_int),
+        ("merge_gap", validation.non_negative_float),
     ):
         if raw.get(key) is not None:
             try:

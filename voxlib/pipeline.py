@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from rich.markup import escape
@@ -25,7 +25,13 @@ from rich.markup import escape
 from . import cache, fluency
 from .audio_utils import extract_audio, KNOWN_EXTENSIONS
 from .console import console
-from .diarization import DiarizationEngine, Segment, IdentifiedSegment
+from .diarization import (
+    DEFAULT_MERGE_GAP_SEC,
+    DiarizationEngine,
+    IdentifiedSegment,
+    Segment,
+    merge_adjacent_segments,
+)
 from .transcriber import Transcriber, TranscribedLine
 from .filler_filter import remove_fillers as _remove_fillers
 from .formatter import (
@@ -63,6 +69,23 @@ def collect_input_files(input_path: Path) -> list[Path]:
     raise FileNotFoundError(f"Path not found: {input_path}")
 
 
+@dataclass
+class DiarizedFile:
+    """
+    Everything one file's diarization step produced.
+
+    raw_segments and segments are both here on purpose: the cache stores the
+    raw ones (so --merge-gap can be retuned without re-running the model),
+    while everything downstream — identification, transcription, the dry-run
+    stats — works on the merged ones.
+    """
+    raw_segments: list[Segment]
+    segments: list[Segment]
+    identified: list[IdentifiedSegment]
+    file_cache: dict
+    threshold: float
+
+
 def _diarize_and_identify(
     file_path: Path,
     wav_path: Path,
@@ -73,29 +96,51 @@ def _diarize_and_identify(
     threshold: float | None,
     reference_fingerprint: dict | None = None,
     transcription_params: dict | None = None,
-) -> tuple[list[Segment], list[IdentifiedSegment], dict, float]:
+    merge_gap: float = DEFAULT_MERGE_GAP_SEC,
+) -> DiarizedFile:
     """Step shared by dry-run and normal mode: diarization + identification,
-    with caching. The last element is the threshold actually applied — with
+    with caching. The returned threshold is the one actually applied — with
     auto-calibration it differs per file, so it's reported, not assumed."""
+    segmentation_params = {"merge_gap": merge_gap}
     file_cache = cache.load_cache(
         cache_dir, file_path, mode="diarization",
         reference_fingerprint=reference_fingerprint, transcription_params=transcription_params,
+        segmentation_params=segmentation_params,
     ) if use_cache else {
         "diarization": None, "identification": None, "transcription": [],
     }
 
+    def save(identification) -> None:
+        # Always stores pyannote's RAW output. Caching the merged form instead
+        # would make merging irreversible: a later run with a different
+        # --merge-gap would re-merge the already-merged segments and could
+        # never recover the original boundaries without re-running the model.
+        cache.save_cache(cache_dir, file_path, mode="diarization", cache_data={
+            "diarization": cache.segments_to_dicts(raw_segments),
+            "identification": identification,
+            "transcription": file_cache.get("transcription", []),
+        }, reference_fingerprint=reference_fingerprint,
+            transcription_params=transcription_params, segmentation_params=segmentation_params)
+
     if file_cache["diarization"] is not None:
-        segments = [Segment(**s) for s in file_cache["diarization"]]
-        logger.info("Diarization loaded from cache (%d segments).", len(segments))
+        raw_segments = [Segment(**s) for s in file_cache["diarization"]]
+        logger.info("Diarization loaded from cache (%d raw segments).", len(raw_segments))
     else:
-        segments = diarizer.diarize(wav_path)
-        logger.info("Found speech segments: %d", len(segments))
+        raw_segments = diarizer.diarize(wav_path)
+        logger.info("Found speech segments: %d", len(raw_segments))
         if use_cache:
-            cache.save_cache(cache_dir, file_path, mode="diarization", cache_data={
-                "diarization": cache.segments_to_dicts(segments),
-                "identification": None,
-                "transcription": file_cache.get("transcription", []),
-            }, reference_fingerprint=reference_fingerprint, transcription_params=transcription_params)
+            save(identification=None)
+
+    # Applied on every run, to the raw segments, so the gap can be retuned
+    # without paying for diarization again.
+    segments = merge_adjacent_segments(raw_segments, max_gap=merge_gap)
+    if len(segments) < len(raw_segments):
+        logger.info(
+            "Merged %d raw segments into %d by stitching same-speaker turns less than "
+            "%.2fs apart — whisper reads a whole phrase far better than the pieces "
+            "diarization cut it into.",
+            len(raw_segments), len(segments), merge_gap,
+        )
 
     if file_cache["identification"] is not None:
         # similarity is cached (expensive: needs the embedding model), but
@@ -125,13 +170,41 @@ def _diarize_and_identify(
         my_count = sum(1 for s in identified if s.is_me)
         logger.info("Identified as 'mine': %d", my_count)
         if use_cache:
-            cache.save_cache(cache_dir, file_path, mode="diarization", cache_data={
-                "diarization": cache.segments_to_dicts(segments),
-                "identification": cache.segments_to_dicts(identified),
-                "transcription": file_cache.get("transcription", []),
-            }, reference_fingerprint=reference_fingerprint, transcription_params=transcription_params)
+            save(identification=cache.segments_to_dicts(identified))
 
-    return segments, identified, file_cache, effective_threshold
+    return DiarizedFile(
+        raw_segments=raw_segments,
+        segments=segments,
+        identified=identified,
+        file_cache=file_cache,
+        threshold=effective_threshold,
+    )
+
+
+def _save_diarized_progress(
+    cache_dir: Path,
+    file_path: Path,
+    diarized: DiarizedFile,
+    transcription_dicts: list[dict],
+    reference_fingerprint: dict | None,
+    transcription_params: dict | None,
+    merge_gap: float,
+) -> None:
+    """
+    Persists transcription progress for a diarized file.
+
+    Writes diarized.raw_segments, not the merged ones: these incremental saves
+    happen many times per file, and any one of them storing the merged form
+    would overwrite pyannote's original boundaries for good, so a later
+    --merge-gap could only ever re-merge what was already merged.
+    """
+    cache.save_cache(cache_dir, file_path, mode="diarization", cache_data={
+        "diarization": cache.segments_to_dicts(diarized.raw_segments),
+        "identification": cache.segments_to_dicts(diarized.identified),
+        "transcription": transcription_dicts,
+    }, reference_fingerprint=reference_fingerprint,
+        transcription_params=transcription_params,
+        segmentation_params={"merge_gap": merge_gap})
 
 
 def _filter_cached_transcription(
@@ -164,14 +237,18 @@ def _process_single_file(
     remove_fillers: bool,
     reference_fingerprint: dict | None = None,
     transcription_params: dict | None = None,
+    merge_gap: float = DEFAULT_MERGE_GAP_SEC,
 ) -> list[TranscribedLine]:
     wav_path = extract_audio(file_path, tmp_dir)
 
     if use_diarization:
-        segments, identified, file_cache, _ = _diarize_and_identify(
+        diarized = _diarize_and_identify(
             file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
             reference_fingerprint=reference_fingerprint, transcription_params=transcription_params,
+            merge_gap=merge_gap,
         )
+        identified = diarized.identified
+        file_cache = diarized.file_cache
 
         cached_transcription_dicts = _filter_cached_transcription(
             file_cache.get("transcription", []), identified
@@ -185,11 +262,10 @@ def _process_single_file(
         def on_segment_done(line: TranscribedLine) -> None:
             cached_transcription_dicts.append(asdict(line))
             if use_cache and len(cached_transcription_dicts) % SAVE_EVERY_N_SEGMENTS == 0:
-                cache.save_cache(cache_dir, file_path, mode="diarization", cache_data={
-                    "diarization": cache.segments_to_dicts(segments),
-                    "identification": cache.segments_to_dicts(identified),
-                    "transcription": cached_transcription_dicts,
-                }, reference_fingerprint=reference_fingerprint, transcription_params=transcription_params)
+                _save_diarized_progress(
+                    cache_dir, file_path, diarized, cached_transcription_dicts,
+                    reference_fingerprint, transcription_params, merge_gap,
+                )
 
         new_lines = transcriber.transcribe_my_segments(
             wav_path, identified, language=language,
@@ -199,11 +275,10 @@ def _process_single_file(
 
         if use_cache and new_lines:
             # Guarantee the last (< SAVE_EVERY_N_SEGMENTS) batch is persisted too.
-            cache.save_cache(cache_dir, file_path, mode="diarization", cache_data={
-                "diarization": cache.segments_to_dicts(segments),
-                "identification": cache.segments_to_dicts(identified),
-                "transcription": cached_transcription_dicts,
-            }, reference_fingerprint=reference_fingerprint, transcription_params=transcription_params)
+            _save_diarized_progress(
+                cache_dir, file_path, diarized, cached_transcription_dicts,
+                reference_fingerprint, transcription_params, merge_gap,
+            )
     else:
         # No diarization: the whole file is transcribed as-is, with whisper's
         # own natural line boundaries (based on pauses in speech) — not a
@@ -268,11 +343,14 @@ def _dry_run_stats_for_file(
     reference_embedding,
     threshold: float | None,
     reference_fingerprint: dict | None = None,
+    merge_gap: float = DEFAULT_MERGE_GAP_SEC,
 ) -> dict:
-    segments, identified, _, effective_threshold = _diarize_and_identify(
+    diarized = _diarize_and_identify(
         file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
-        reference_fingerprint=reference_fingerprint,
+        reference_fingerprint=reference_fingerprint, merge_gap=merge_gap,
     )
+    segments, identified = diarized.segments, diarized.identified
+    effective_threshold = diarized.threshold
     speakers = {s.speaker_label for s in segments}
     total_duration = sum(s.end - s.start for s in segments)
     my_segments = [s for s in identified if s.is_me]
@@ -415,6 +493,7 @@ def run_pipeline(
     remove_fillers: bool = False,
     batch_size: int | None = None,
     fluency_log: Path | None = None,
+    merge_gap: float = DEFAULT_MERGE_GAP_SEC,
 ) -> dict:
     """
     Returns a dict with paths to the final files and stats:
@@ -486,7 +565,7 @@ def run_pipeline(
                         wav_path = extract_audio(file_path, Path(file_tmp))
                         stats = _dry_run_stats_for_file(
                             file_path, wav_path, cache_dir, use_cache, diarizer, reference_embedding, threshold,
-                            reference_fingerprint=reference_fingerprint,
+                            reference_fingerprint=reference_fingerprint, merge_gap=merge_gap,
                         )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Failed to process %s: %s", file_path.name, exc)
@@ -523,6 +602,7 @@ def run_pipeline(
                         remove_fillers=remove_fillers,
                         reference_fingerprint=reference_fingerprint,
                         transcription_params=transcription_params,
+                        merge_gap=merge_gap,
                     )
             except Exception as exc:  # noqa: BLE001
                 # A per-file failure (corrupt recording, unsupported codec, a

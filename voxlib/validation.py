@@ -56,6 +56,13 @@ def logprob_threshold(value, name: str = "low_confidence_threshold") -> float:
     return parsed
 
 
+def non_negative_float(value, name: str) -> float:
+    parsed = _as_float(value, name)
+    if parsed < 0:
+        raise ValueError(f"{name} must be 0 or greater, got {parsed} (0 turns the feature off)")
+    return parsed
+
+
 def positive_int(value, name: str) -> int:
     # int(str(...)) rather than int(...) on purpose: int(8.5) would silently
     # truncate a fractional YAML value to 8 instead of rejecting it.

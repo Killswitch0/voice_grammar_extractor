@@ -16,6 +16,11 @@ The cache is invalidated in layers, each narrower than the last:
   - the reference voice sample changed -> identification and transcription
     are reset, but diarization (segmentation of the recording itself) is
     kept, since it never depended on the reference voice.
+  - the segment-merging gap changed -> identification and transcription are
+    reset, but diarization is kept: merging is applied to pyannote's raw
+    output every run, so a different gap reshapes the segments without
+    needing the expensive model pass again. Everything computed per segment
+    afterwards is keyed to those boundaries, though, and has to go.
   - the transcription-affecting settings changed (whisper model, language,
     batch size) -> only transcription is reset; diarization/identification
     are untouched.
@@ -63,6 +68,7 @@ def load_cache(
     mode: str,
     reference_fingerprint: dict | None = None,
     transcription_params: dict | None = None,
+    segmentation_params: dict | None = None,
 ) -> dict[str, Any]:
     """
     Returns the cache for this file, narrowed down by whichever of the
@@ -108,6 +114,16 @@ def load_cache(
             result["identification"] = None
             result["transcription"] = []
 
+    if mode == "diarization" and segmentation_params is not None:
+        if data.get("segmentation_params") != segmentation_params:
+            logger.info(
+                "Segment merging changed since the last run on %s — identification and "
+                "transcription were reset (raw diarization is kept and re-merged).",
+                input_file.name,
+            )
+            result["identification"] = None
+            result["transcription"] = []
+
     if transcription_params is not None and data.get("transcription_params") != transcription_params:
         logger.info(
             "Transcription settings (model/language/batch size) changed since the last "
@@ -126,6 +142,7 @@ def save_cache(
     cache_data: dict[str, Any],
     reference_fingerprint: dict | None = None,
     transcription_params: dict | None = None,
+    segmentation_params: dict | None = None,
 ) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = _cache_path(cache_dir, input_file)
@@ -138,6 +155,8 @@ def save_cache(
         payload["reference_fingerprint"] = reference_fingerprint
     if transcription_params is not None:
         payload["transcription_params"] = transcription_params
+    if segmentation_params is not None:
+        payload["segmentation_params"] = segmentation_params
 
     tmp_path = path.with_suffix(".json.tmp")
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

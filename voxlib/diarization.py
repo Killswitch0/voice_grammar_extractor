@@ -23,6 +23,17 @@ from .console import track
 logger = logging.getLogger(__name__)
 
 DEFAULT_THRESHOLD = 0.75
+
+# Diarization cuts at every short pause, which is not where sentences end.
+# Consecutive turns by the same speaker closer together than this are one
+# breath of speech, not two, and are stitched back together before anything
+# else sees them. See merge_adjacent_segments for why it matters so much.
+DEFAULT_MERGE_GAP_SEC = 0.8
+
+# Whisper's encoder works on 30-second windows; beyond that it chunks
+# internally and the benefit of a longer segment stops accruing. Also keeps a
+# merged line from swallowing a whole monologue into one unreadable paragraph.
+MAX_MERGED_DURATION_SEC = 30.0
 # Below this, the best-matching speaker isn't a confident match at all (likely
 # a mismatched reference sample or wrong file) — don't trust gap-based auto
 # calibration in that case, since it would still confidently pick *someone*.
@@ -42,6 +53,60 @@ class IdentifiedSegment:
     end: float
     is_me: bool
     similarity: float
+
+
+def merge_adjacent_segments(
+    segments: list[Segment],
+    max_gap: float = DEFAULT_MERGE_GAP_SEC,
+    max_duration: float = MAX_MERGED_DURATION_SEC,
+) -> list[Segment]:
+    """
+    Stitches consecutive segments of the SAME speaker back together when only
+    a short pause separates them.
+
+    Diarization answers "who is speaking when", and it cuts wherever the voice
+    stops — mid-sentence pauses included. Each fragment then goes to whisper on
+    its own, and whisper is markedly worse on one or two seconds of audio than
+    on ten: it has no surrounding words to condition on. In this project's
+    archived sessions the low-confidence lines have a median length of 1-2
+    words while the confident ones run 6-13, which is the same fact seen from
+    the other end.
+
+    That costs twice over. Recognition quality drops, so more lines get the
+    [?] marker and are excluded from grammar judgment entirely. And a fragment
+    can't be judged grammatically even when it IS recognized correctly — "So,
+    and I just..." has no verifiable grammar in it, and a mistake spanning the
+    cut is invisible to both halves.
+
+    Only adjacent entries in start-order are considered, so a turn by someone
+    else in between always blocks the merge: A, B, A stays three segments.
+    Overlaps (a negative gap) merge too — they're the same voice continuing.
+    """
+    if max_gap <= 0 or not segments:
+        return list(segments)
+
+    ordered = sorted(segments, key=lambda s: (s.start, s.end))
+    merged: list[Segment] = [
+        Segment(start=ordered[0].start, end=ordered[0].end, speaker_label=ordered[0].speaker_label)
+    ]
+
+    for segment in ordered[1:]:
+        current = merged[-1]
+        joinable = (
+            segment.speaker_label == current.speaker_label
+            and segment.start - current.end <= max_gap
+            and segment.end - current.start <= max_duration
+        )
+        if joinable:
+            # max() rather than assignment: a fully-contained overlapping
+            # segment must not shorten the one it's being folded into.
+            current.end = max(current.end, segment.end)
+        else:
+            merged.append(
+                Segment(start=segment.start, end=segment.end, speaker_label=segment.speaker_label)
+            )
+
+    return merged
 
 
 class DiarizationEngine:
