@@ -57,5 +57,21 @@ jobs:
       # Scans requirements.txt for known CVEs. Doesn't install the heavy
       # torch/pyannote.audio/faster-whisper deps themselves — pip-audit reads
       # the pinned versions from the file directly.
+      # PYSEC-2026-3624 / CVE-2026-58659 (RCE in lightning's _load_state) is
+      # accepted, not fixed, because there is currently nothing to upgrade to:
+      # lightning arrives transitively via pyannote.audio ("lightning>=2.4"),
+      # every release up to and including the latest (2.6.5) is affected, and
+      # the fix exists only as unreleased commit d710d68.
+      #
+      # Reaching the vulnerable path needs a malicious *checkpoint* to be fed
+      # to LightningModule.load_from_checkpoint. This project loads exactly
+      # two, both hardcoded in voxlib/diarization.py and both from official
+      # gated pyannote repos on HuggingFace. Nothing a user supplies is ever a
+      # checkpoint — their input is audio, which goes to ffmpeg and whisper.
+      # Exploiting this would mean those repos were compromised, which is a
+      # supply-chain problem much larger than this one CVE.
+      #
+      # Remove the flag (and re-pin lightning) as soon as a release containing
+      # d710d68 exists.
       - name: Audit dependencies for known vulnerabilities
-        run: pipx run pip-audit -r requirements.txt
+        run: pipx run pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-3624
