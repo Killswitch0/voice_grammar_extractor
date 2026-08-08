@@ -56,6 +56,20 @@ def _fluency_log_path() -> Path | None:
     return candidate / "fluency_history.csv" if candidate.is_dir() else None
 
 
+def _processed_log_path(output_dir: Path) -> Path:
+    """
+    Where to keep the record of which recordings have already been transcribed.
+
+    Prefers `analysis/`, this project's coaching workspace: that folder is what
+    gets backed up, and the log exists to protect the running mistake counts
+    that live there. Falls back to the output folder for anyone using the
+    extractor on its own, so the protection isn't conditional on a workspace
+    they don't have.
+    """
+    workspace = Path(__file__).parent / "analysis"
+    return (workspace if workspace.is_dir() else output_dir) / "processed.json"
+
+
 def _checked(validator, name: str):
     """
     Turns one of voxlib.validation's checks into an argparse `type=`.
@@ -161,6 +175,14 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
              f"many seconds apart (default: {DEFAULT_MERGE_GAP_SEC}). Diarization cuts at every "
              f"pause, including mid-sentence ones, and whisper recognizes a whole phrase far "
              f"better than the fragments. Use 0 to keep the raw segments.",
+    )
+    parser.add_argument(
+        "--only-new",
+        action="store_true",
+        help="Skip recordings that have already been transcribed in an earlier run "
+             "(matched by file content, not name). Without this, they're processed again "
+             "and only a warning is printed — re-running a session on purpose is a normal "
+             "thing to do.",
     )
     parser.add_argument(
         "--no-cache",
@@ -288,6 +310,9 @@ def _print_full_result(result: dict) -> None:
     if result.get("fluency") is not None:
         from voxlib.fluency import describe
         console.print(f"  Fluency: {escape(describe(result['fluency']))}")
+    if result.get("already_processed"):
+        console.print()
+        console.print(f"[bold yellow]Already transcribed:[/] {escape(result['already_processed'])}")
     if result.get("low_confidence_warning"):
         console.print()
         console.print(f"[bold yellow]Recording quality:[/] {escape(result['low_confidence_warning'])}")
@@ -345,6 +370,8 @@ def main() -> int:
             batch_size=args.batch_size,
             fluency_log=_fluency_log_path(),
             merge_gap=args.merge_gap,
+            processed_log_path=_processed_log_path(args.output_dir),
+            only_new=args.only_new,
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/]")

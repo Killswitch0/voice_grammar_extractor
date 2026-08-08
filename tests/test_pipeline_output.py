@@ -404,6 +404,127 @@ def test_diarized_run_writes_only_my_lines_end_to_end(tmp_path, monkeypatch):
     assert result["fluency"].median_pause_sec is None
 
 
+def test_reprocessing_the_same_recording_warns_but_still_runs(tmp_path, monkeypatch):
+    """
+    Re-running a session on purpose (a different --threshold, say) has to keep
+    working — the warning exists for the case where the folder simply wasn't
+    cleared, and only the owner can tell those apart.
+    """
+    log_path = tmp_path / "processed.json"
+    output_dir = tmp_path / "output"
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"fake recording bytes")
+
+    def run():
+        return _run_solo_pipeline(
+            tmp_path, monkeypatch,
+            FakeSoloTranscriber([TranscribedLine(start=0.0, end=1.0, text="something")]),
+            input_path=input_file, output_dir=output_dir, processed_log_path=log_path,
+        )
+
+    first = run()
+    assert "already_processed" not in first
+
+    second = run()
+    assert "double-count" in second["already_processed"]
+    assert (output_dir / "transcript_clean.txt").read_text(encoding="utf-8").strip() == "something"
+
+
+def test_only_new_skips_what_was_already_transcribed(tmp_path, monkeypatch):
+    log_path = tmp_path / "processed.json"
+    output_dir = tmp_path / "output"
+    recordings = tmp_path / "recordings"
+    recordings.mkdir()
+    old = recordings / "old.wav"
+    old.write_bytes(b"last session's audio")
+
+    from voxlib import processed
+    processed.record(log_path, [old], when="2026-08-06")
+
+    new = recordings / "new.wav"
+    new.write_bytes(b"this session's audio, a different length")
+
+    seen_inputs = []
+
+    def recording_extract(input_path, out_dir):
+        seen_inputs.append(input_path.name)
+        return _fake_extract_audio(input_path, out_dir)
+
+    _run_solo_pipeline(
+        tmp_path, monkeypatch,
+        FakeSoloTranscriber([TranscribedLine(start=0.0, end=1.0, text="something")]),
+        extract=recording_extract,
+        input_path=recordings, output_dir=output_dir,
+        processed_log_path=log_path, only_new=True,
+    )
+
+    assert seen_inputs == ["new.wav"]
+
+
+def test_only_new_with_nothing_new_refuses_rather_than_writing_an_empty_run(tmp_path, monkeypatch):
+    log_path = tmp_path / "processed.json"
+    output_dir = tmp_path / "output"
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"already seen")
+
+    from voxlib import processed
+    processed.record(log_path, [input_file], when="2026-08-06")
+
+    with pytest.raises(RuntimeError, match="--only-new left nothing to do"):
+        _run_solo_pipeline(
+            tmp_path, monkeypatch,
+            FakeSoloTranscriber([TranscribedLine(start=0.0, end=1.0, text="something")]),
+            input_path=input_file, output_dir=output_dir,
+            processed_log_path=log_path, only_new=True,
+        )
+
+    assert not (output_dir / "transcript_clean.txt").exists()
+
+
+def test_a_run_that_produced_nothing_is_not_recorded_as_processed(tmp_path, monkeypatch):
+    """Otherwise the retry that actually works would come with a spurious
+    'already transcribed' warning, training the owner to ignore it."""
+    log_path = tmp_path / "processed.json"
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"fake recording bytes")
+
+    with pytest.raises(RuntimeError):
+        _run_solo_pipeline(
+            tmp_path, monkeypatch, FakeSoloTranscriber([]),
+            input_path=input_file, output_dir=tmp_path / "output",
+            processed_log_path=log_path,
+        )
+
+    assert not log_path.exists()
+
+
+def test_dry_run_warns_without_recording_anything(tmp_path, monkeypatch):
+    from voxlib import processed
+
+    log_path = tmp_path / "processed.json"
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"fake recording bytes")
+    processed.record(log_path, [input_file], when="2026-08-06")
+    before = log_path.read_text(encoding="utf-8")
+
+    monkeypatch.setattr(pipeline, "extract_audio", _fake_extract_audio)
+    monkeypatch.setattr(pipeline, "DiarizationEngine", lambda **_: FakeDiarizationEngine(
+        [Segment(start=0.0, end=2.0, speaker_label="SPEAKER_00")], {"SPEAKER_00": 0.9},
+    ))
+    reference = tmp_path / "me.wav"
+    reference.write_bytes(b"reference")
+
+    result = pipeline.run_pipeline(
+        input_path=input_file, reference_voice=reference, output_dir=tmp_path / "output",
+        hf_token="hf_fake", threshold=0.5, use_diarization=True, use_cache=False,
+        dry_run=True, processed_log_path=log_path,
+    )
+
+    assert "already_processed" in result
+    # A dry run produces no transcript, so nothing has been processed.
+    assert log_path.read_text(encoding="utf-8") == before
+
+
 def test_no_lines_message_distinguishes_no_match_from_no_speech():
     files = [Path("a.webm")]
 

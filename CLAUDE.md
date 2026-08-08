@@ -133,6 +133,12 @@ slow transcription on an unverified split):
 ```
 If there's no saved reference sample yet, run `./identify.sh recordings/<filename>` first.
 
+If the run warns that some recordings were **already transcribed before**,
+stop and check with the owner before continuing: unless they're deliberately
+re-running a session, old speech is about to be merged into this session's
+transcript, and the occurrence counters in `memory.md` would count it twice.
+`--only-new` processes just the new files.
+
 Either way, this overwrites `output/transcript_clean.txt`,
 `output/transcript_annotated.txt`, `output/lines.json` and
 `output/fluency.json`. If already processed, skip to step 2.
@@ -589,6 +595,9 @@ analysis/
   fluency_history.csv    append-only, written by the PIPELINE, never by hand: filler rate,
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.
+  processed.json         written by the PIPELINE: which recordings have already been
+                           transcribed (matched by content, not filename). Guards against
+                           merging the same audio into two sessions. Don't edit it.
   conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
                                tracks which memory.md patterns have been drilled in
                                dialogue, when, and on a spaced-repetition schedule

@@ -169,6 +169,7 @@ python main.py monologue.mp4 --no-diarization -o output/
 | `--device cuda` | Use GPU, if available |
 | `-v` | Verbose logging |
 | `--config path.yaml` | Take settings from a YAML file instead of a long list of flags (see `config.example.yaml`) |
+| `--only-new` | Skip recordings already transcribed in an earlier run (matched by content, not name) |
 | `--no-cache` | Recompute everything from scratch, ignoring saved progress |
 | `--split-chars 15000` | Additionally split `transcript_clean.txt` into parts of the given size in `output/parts/` |
 | `--low-confidence-threshold -0.5` | Whisper confidence threshold below which a line is marked `[?]` in the annotated document |
@@ -254,6 +255,31 @@ window size.
 
 The raw segments are what gets cached, so you can retune `--merge-gap` and
 re-run without paying for diarization again.
+
+## Not transcribing the same recording twice
+
+Merging many files into one transcript is normal — a session gets recorded in
+parts and the whole folder is processed at once. Merging the *same* audio in
+twice is not, and it's easy to do by accident: the recordings folder wasn't
+cleared before the next session, or a run got repeated and archived under a
+second date. The mistake counts in `analysis/memory.md` are a running tally
+rather than something recomputed from source, so a double-counted session
+never washes out of them.
+
+Every successful run therefore records what it transcribed, in
+`analysis/processed.json` (or `<output>/processed.json` if you're using the
+extractor without the coaching workspace). Recordings are matched **by content,
+not by name** — this project's folder gets emptied and refilled every session,
+so `part_01.webm` is a different recording each time while the filename stays
+put.
+
+By default a repeat only prints a warning, because re-running a session on
+purpose — to try a different `--threshold`, say — is a perfectly normal thing
+to do, and only you can tell the two cases apart. Pass `--only-new` when the
+intent really is "just the files I haven't done yet".
+
+A run that produced nothing isn't recorded, so the retry that actually works
+doesn't come with a spurious warning.
 
 ## Sentences cut across files
 

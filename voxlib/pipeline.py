@@ -22,7 +22,7 @@ from pathlib import Path
 
 from rich.markup import escape
 
-from . import cache, fluency
+from . import cache, fluency, processed as processed_log
 from .audio_utils import extract_audio, KNOWN_EXTENSIONS
 from .console import console
 from .diarization import (
@@ -495,6 +495,8 @@ def run_pipeline(
     batch_size: int | None = None,
     fluency_log: Path | None = None,
     merge_gap: float = DEFAULT_MERGE_GAP_SEC,
+    processed_log_path: Path | None = None,
+    only_new: bool = False,
 ) -> dict:
     """
     Returns a dict with paths to the final files and stats:
@@ -504,6 +506,31 @@ def run_pipeline(
     """
     input_files = collect_input_files(input_path)
     logger.info("Files found to process: %d", len(input_files))
+
+    # Merging many files into one transcript is normal — a session is recorded
+    # in parts. Merging the SAME audio in twice is not, and it permanently
+    # inflates the running mistake counts in memory.md. See voxlib/processed.py.
+    already_seen: dict = {}
+    if processed_log_path is not None:
+        already_seen = processed_log.previously_processed(
+            processed_log.load(processed_log_path), input_files
+        )
+        if already_seen:
+            logger.warning("%s", processed_log.describe(already_seen, only_new))
+            if only_new:
+                input_files = [f for f in input_files if f not in already_seen]
+                if not input_files:
+                    raise RuntimeError(
+                        "Every recording in this run has already been transcribed, and "
+                        "--only-new left nothing to do. Nothing was written. Drop --only-new "
+                        "to process them again."
+                    )
+                logger.info("Processing %d new recording(s).", len(input_files))
+    elif only_new:
+        logger.warning(
+            "--only-new has nothing to compare against: no processed-recordings log is "
+            "being kept for this run, so every file is treated as new."
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = output_dir / ".cache"
@@ -577,6 +604,10 @@ def run_pipeline(
             result = {"dry_run": True, "per_file": per_file_stats}
             if failed_files:
                 result["failed_files"] = failed_files
+            if already_seen:
+                # Warned about, but deliberately not recorded: a dry run
+                # produces no transcript, so nothing has been processed.
+                result["already_processed"] = processed_log.describe(already_seen, only_new)
             return result
 
         # Full run: the transcriber is only needed here, not in dry-run,
@@ -676,6 +707,16 @@ def run_pipeline(
     result["fluency"] = metrics
     if fluency_log is not None:
         fluency.append_history(fluency_log, metrics, mode=mode, files=processed_files)
+
+    # Only now, with documents actually on disk: a run that crashed or produced
+    # nothing hasn't "processed" anything, and marking it so would suppress the
+    # warning on the retry that matters.
+    if processed_log_path is not None:
+        failed_names = {f["file"] for f in failed_files}
+        succeeded = [f for f in input_files if f.name not in failed_names]
+        processed_log.record(processed_log_path, succeeded)
+    if already_seen:
+        result["already_processed"] = processed_log.describe(already_seen, only_new)
 
     logger.info("Done. Total lines: %d", len(all_lines))
     logger.info("Annotated document: %s", annotated_path)
