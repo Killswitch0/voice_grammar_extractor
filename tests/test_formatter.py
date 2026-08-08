@@ -258,3 +258,29 @@ def test_lines_json_flags_both_halves_of_a_split_sentence(tmp_path: Path):
 def test_detect_split_sentences_handles_empty_and_single_line_input():
     assert detect_split_sentences([]) == []
     assert detect_split_sentences([SourcedLine("a.webm", 0.0, 1.0, "hi", None)]) == [False]
+
+
+def test_lines_json_records_what_produced_it(tmp_path: Path):
+    """
+    Sessions get compared for months. When a number moves, it has to be
+    possible to tell whether the speaker changed or the apparatus did — which
+    needs the apparatus written down next to the result.
+    """
+    path = tmp_path / "lines.json"
+
+    write_lines_json(
+        _mixed_confidence_lines(), path, low_confidence_threshold=-0.5,
+        produced_by={"mode": "diarization", "whisper_model": "small", "merge_gap": 0.8},
+    )
+
+    produced_by = json.loads(path.read_text(encoding="utf-8"))["produced_by"]
+    assert produced_by["whisper_model"] == "small"
+    assert produced_by["merge_gap"] == 0.8
+
+
+def test_lines_json_produced_by_defaults_to_empty_not_missing(tmp_path: Path):
+    path = tmp_path / "lines.json"
+
+    write_lines_json(_mixed_confidence_lines(), path)
+
+    assert json.loads(path.read_text(encoding="utf-8"))["produced_by"] == {}

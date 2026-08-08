@@ -22,6 +22,26 @@ from .console import track
 
 logger = logging.getLogger(__name__)
 
+# Pinned to exact commits rather than tracking each repo's default branch.
+#
+# Not primarily a security measure — the point is that this project reads a
+# months-long trend out of its own transcripts. A new model release changes
+# where segments are cut, which changes what counts as your speech, which
+# changes line counts, the low-confidence share and the mistake tallies in
+# analysis/memory.md. None of that would say why it moved: it would read as
+# your English changing when the measuring instrument changed. The
+# speaker-diarization repo was last updated 2025-09-29, so this is not
+# hypothetical.
+#
+# The cost is that model improvements now arrive only when these are bumped
+# deliberately — the same trade requirements.txt already makes for the Python
+# dependencies. Bump both, then re-run a past session and compare before
+# trusting the new numbers against the old ones.
+DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+DIARIZATION_REVISION = "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee"  # 2025-09-29
+EMBEDDING_MODEL = "pyannote/embedding"
+EMBEDDING_REVISION = "4db4899737a38b2d618bbd74350915aa10293cb2"  # 2024-05-10
+
 DEFAULT_THRESHOLD = 0.75
 
 # Diarization cuts at every short pause, which is not where sentences end.
@@ -116,14 +136,16 @@ class DiarizationEngine:
 
         self.device = torch.device(device)
 
-        logger.info("Loading diarization model (pyannote/speaker-diarization-community-1)...")
+        logger.info("Loading diarization model (%s @ %s)...", DIARIZATION_MODEL, DIARIZATION_REVISION[:8])
         self.diarization_pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-community-1", token=hf_token
+            DIARIZATION_MODEL, revision=DIARIZATION_REVISION, token=hf_token
         )
         self.diarization_pipeline.to(self.device)
 
-        logger.info("Loading voice embedding model (pyannote/embedding)...")
-        embedding_model = Model.from_pretrained("pyannote/embedding", token=hf_token)
+        logger.info("Loading voice embedding model (%s @ %s)...", EMBEDDING_MODEL, EMBEDDING_REVISION[:8])
+        embedding_model = Model.from_pretrained(
+            EMBEDDING_MODEL, revision=EMBEDDING_REVISION, token=hf_token
+        )
         self.embedding_inference = Inference(embedding_model, window="whole")
         self.embedding_inference.to(self.device)
 

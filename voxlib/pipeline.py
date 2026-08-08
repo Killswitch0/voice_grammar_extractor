@@ -27,6 +27,10 @@ from .audio_utils import extract_audio, KNOWN_EXTENSIONS
 from .console import console
 from .diarization import (
     DEFAULT_MERGE_GAP_SEC,
+    DIARIZATION_MODEL,
+    DIARIZATION_REVISION,
+    EMBEDDING_MODEL,
+    EMBEDDING_REVISION,
     DiarizationEngine,
     IdentifiedSegment,
     Segment,
@@ -668,9 +672,28 @@ def run_pipeline(
     clean_path = output_dir / "transcript_clean.txt"
     lines_json_path = output_dir / "lines.json"
 
+    # What produced this transcript, recorded alongside it. A number moving
+    # between sessions has to be attributable either to the speaker or to the
+    # apparatus, and that's only possible if the apparatus is written down.
+    mode = "diarization" if use_diarization else "solo"
+    produced_by = {
+        "mode": mode,
+        "whisper_model": whisper_model,
+        "language": language,
+        "batch_size": batch_size,
+        "remove_fillers": remove_fillers,
+        "threshold": threshold,  # None means it was auto-calibrated per file
+        "merge_gap": merge_gap if use_diarization else None,
+        "diarization_model": f"{DIARIZATION_MODEL}@{DIARIZATION_REVISION}" if use_diarization else None,
+        "embedding_model": f"{EMBEDDING_MODEL}@{EMBEDDING_REVISION}" if use_diarization else None,
+    }
+
     write_annotated_document(all_lines, annotated_path, low_confidence_threshold=low_confidence_threshold)
     write_clean_document(all_lines, clean_path)
-    write_lines_json(all_lines, lines_json_path, low_confidence_threshold=low_confidence_threshold)
+    write_lines_json(
+        all_lines, lines_json_path,
+        low_confidence_threshold=low_confidence_threshold, produced_by=produced_by,
+    )
 
     result: dict = {"annotated": annotated_path, "clean": clean_path, "lines_json": lines_json_path}
     if failed_files:
@@ -687,7 +710,6 @@ def run_pipeline(
     # off the finished transcript later — a number that's re-derived by hand
     # every session isn't comparable across sessions, which is the only thing
     # a fluency number is for. See voxlib/fluency.py.
-    mode = "diarization" if use_diarization else "solo"
     processed_files = len(input_files) - len(failed_files)
     metrics = fluency.compute_fluency(
         all_lines, use_diarization=use_diarization, fillers_removed=remove_fillers,

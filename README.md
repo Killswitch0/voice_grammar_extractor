@@ -201,7 +201,8 @@ Four files will appear in the output folder:
 
 - **`lines.json`** — the same lines, structured: each one with its source
   file, timing, whisper confidence score and a `low_confidence` flag, plus
-  precomputed totals.
+  precomputed totals and a `produced_by` block recording the settings and
+  pinned model revisions that made this transcript.
   ```json
   {
     "index": 1,
@@ -280,6 +281,27 @@ intent really is "just the files I haven't done yet".
 
 A run that produced nothing isn't recorded, so the retry that actually works
 doesn't come with a spurious warning.
+
+## Pinned models
+
+The two pyannote models are loaded at fixed commits, not from whatever their
+default branch points at today (`voxlib/diarization.py`).
+
+The reason isn't security, it's comparability. A new model release changes
+where segments get cut, which changes what counts as your speech, which
+changes line counts, the low-confidence share and every mistake tally derived
+from them — and nothing in the trend would say why. It would read as your
+English changing when the measuring instrument changed. The
+speaker-diarization repo was last updated in September 2025, so this isn't
+hypothetical.
+
+The trade is that model improvements now arrive only when you bump those
+constants deliberately — the same deal `requirements.txt` already makes for
+the Python dependencies. When you do bump them, re-run a past session and
+compare before trusting the new numbers against the old ones.
+
+Each run records which revisions it used in `lines.json` under `produced_by`,
+so an archived session can always be traced back to what produced it.
 
 ## Sentences cut across files
 

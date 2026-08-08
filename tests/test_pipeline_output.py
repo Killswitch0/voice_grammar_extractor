@@ -549,3 +549,58 @@ def test_no_lines_message_separates_partial_failures_from_total_ones():
                               use_diarization=True)
     assert "Every file failed" in total
     assert "recognized as your voice" not in total  # nothing was successfully processed
+
+
+def test_produced_by_records_the_pinned_model_revisions(tmp_path, monkeypatch):
+    """A model release moves where segments are cut, which moves every count
+    downstream. The revision that produced a session travels with it."""
+    import json
+
+    from voxlib.diarization import DIARIZATION_REVISION, EMBEDDING_REVISION
+
+    output_dir = tmp_path / "output"
+    input_file = tmp_path / "call.webm"
+    input_file.write_bytes(b"fake recording bytes")
+    reference = tmp_path / "me.wav"
+    reference.write_bytes(b"fake reference bytes")
+
+    engine = FakeDiarizationEngine(
+        [Segment(start=0.0, end=2.0, speaker_label="SPEAKER_00")], {"SPEAKER_00": 0.9},
+    )
+    monkeypatch.setattr(pipeline, "extract_audio", _fake_extract_audio)
+    monkeypatch.setattr(pipeline, "DiarizationEngine", lambda **_: engine)
+    monkeypatch.setattr(pipeline, "Transcriber", lambda **_: FakeSegmentTranscriber())
+
+    result = pipeline.run_pipeline(
+        input_path=input_file, reference_voice=reference, output_dir=output_dir,
+        hf_token="hf_fake", threshold=0.75, use_diarization=True, use_cache=False,
+        merge_gap=0.8,
+    )
+
+    produced_by = json.loads(result["lines_json"].read_text(encoding="utf-8"))["produced_by"]
+    assert produced_by["mode"] == "diarization"
+    assert produced_by["merge_gap"] == 0.8
+    assert produced_by["threshold"] == 0.75
+    assert DIARIZATION_REVISION in produced_by["diarization_model"]
+    assert EMBEDDING_REVISION in produced_by["embedding_model"]
+
+
+def test_solo_runs_record_no_diarization_settings(tmp_path, monkeypatch):
+    """Nothing pyannote-shaped ran, so claiming a model revision would be a
+    fabricated provenance record."""
+    import json
+
+    output_dir = tmp_path / "output"
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"fake recording bytes")
+
+    result = _run_solo_pipeline(
+        tmp_path, monkeypatch,
+        FakeSoloTranscriber([TranscribedLine(start=0.0, end=1.0, text="something")]),
+        input_path=input_file, output_dir=output_dir,
+    )
+
+    produced_by = json.loads(result["lines_json"].read_text(encoding="utf-8"))["produced_by"]
+    assert produced_by["mode"] == "solo"
+    assert produced_by["diarization_model"] is None
+    assert produced_by["merge_gap"] is None

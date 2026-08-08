@@ -147,6 +147,7 @@ def write_lines_json(
     lines: list[SourcedLine],
     output_path: Path,
     low_confidence_threshold: float = DEFAULT_LOW_CONFIDENCE_THRESHOLD,
+    produced_by: dict | None = None,
 ) -> None:
     """
     The same lines as the two text documents, in a form nothing has to parse.
@@ -163,6 +164,11 @@ def write_lines_json(
     timing, and the totals are precomputed. `timestamp` is redundant with
     `start` on purpose: it's what the annotated document prints, so a line can
     still be found there by eye when a human wants to look.
+
+    `produced_by` records the settings that made this transcript — whisper
+    model, language, merge gap, the pinned model revisions. Sessions get
+    compared against each other for months, so when a number moves it has to
+    be possible to check whether the speaker changed or the apparatus did.
     """
     low_confidence_flags = [is_low_confidence(line.avg_logprob, low_confidence_threshold) for line in lines]
     continues = detect_split_sentences(lines)
@@ -172,6 +178,7 @@ def write_lines_json(
 
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "produced_by": produced_by or {},
         "low_confidence_threshold": low_confidence_threshold,
         "totals": {
             "lines": len(lines),
