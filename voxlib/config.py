@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from . import validation
+
 
 # Keys allowed in the config file — match the argparse dest names.
 ALLOWED_KEYS = {
@@ -48,16 +50,21 @@ def load_config(config_path: Path) -> dict[str, Any]:
             f"Allowed keys: {sorted(ALLOWED_KEYS)}"
         )
 
-    # A cosine similarity, mathematically bounded to [-1.0, 1.0] (see
-    # DiarizationEngine.cosine_similarity) — the same check argparse applies
-    # to --threshold on the command line, applied here too since a config
-    # value never goes through argparse's own type= conversion.
-    if "threshold" in raw and raw["threshold"] is not None:
-        threshold = raw["threshold"]
-        if not (-1.0 <= threshold <= 1.0):
-            raise ValueError(
-                f"threshold in config {config_path} must be between -1.0 and 1.0, got {threshold}"
-            )
+    # A config value never passes through argparse's own type= conversion, so
+    # the numeric checks have to be applied here too — from voxlib/validation.py,
+    # the same module main.py's argparse types wrap, so the two entry points
+    # can't drift apart.
+    for key, validator in (
+        ("threshold", validation.cosine_threshold),
+        ("low_confidence_threshold", validation.logprob_threshold),
+        ("split_chars", validation.positive_int),
+        ("batch_size", validation.positive_int),
+    ):
+        if raw.get(key) is not None:
+            try:
+                raw[key] = validator(raw[key], key)
+            except ValueError as exc:
+                raise ValueError(f"In config {config_path}: {exc}") from exc
 
     # reference and output_dir are more convenient to specify as path strings in the config
     if "reference" in raw and raw["reference"] is not None:

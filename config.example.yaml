@@ -8,12 +8,12 @@ reference: my_voice.wav
 output_dir: output
 hf_token: null          # better to set via the HF_TOKEN env var than to store it here
 whisper_model: small
-language: en
+language: en          # or 'auto' to detect it once per file
 device: cpu
-threshold: null       # auto-calibrated per recording; set a number to override
+threshold: null       # auto-calibrated per recording; set a number to override. -1.0 to 1.0
 no_diarization: false
-split_chars: 15000
-low_confidence_threshold: -0.5
+split_chars: 15000    # whole number > 0, or null to keep one file
+low_confidence_threshold: -0.5   # whisper avg_logprob, so always <= 0
 remove_fillers: false
-batch_size: null      # e.g. 8 — enables batched transcription (useful on GPU)
+batch_size: null      # e.g. 8 — enables batched transcription (useful on GPU). Whole number > 0
 log_file: null        # e.g. output/run.log — also write the log to a file

@@ -36,6 +36,7 @@ from rich.table import Table
 sys.path.insert(0, str(Path(__file__).parent))
 
 from voxlib.console import configure_logging, console, print_error  # noqa: E402
+from voxlib import validation  # noqa: E402
 
 
 def _fluency_log_path() -> Path | None:
@@ -54,17 +55,24 @@ def _fluency_log_path() -> Path | None:
     return candidate / "fluency_history.csv" if candidate.is_dir() else None
 
 
-def _threshold_type(value: str) -> float:
-    """argparse type= for --threshold: it's a cosine similarity (see
-    DiarizationEngine.cosine_similarity), which is mathematically bounded to
-    [-1.0, 1.0] — anything outside that range can only be a typo (e.g. "8.0"
-    meant as "0.8") and would otherwise silently misidentify every speaker."""
-    parsed = float(value)
-    if not (-1.0 <= parsed <= 1.0):
-        raise argparse.ArgumentTypeError(
-            f"must be between -1.0 and 1.0 (cosine similarity), got {parsed}"
-        )
-    return parsed
+def _checked(validator, name: str):
+    """
+    Turns one of voxlib.validation's checks into an argparse `type=`.
+
+    The checks live there, not here, because a `--config` file reaches the same
+    settings without passing through argparse at all — one definition is what
+    keeps the two entry points from disagreeing. This only adapts the error
+    type, so argparse prints the message instead of swallowing it behind its
+    own generic "invalid value".
+    """
+    def parse(raw: str):
+        try:
+            return validator(raw, name)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from exc
+
+    parse.__name__ = name.lstrip("-").replace("-", "_")
+    return parse
 
 
 def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentParser:
@@ -131,7 +139,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--threshold",
-        type=_threshold_type,
+        type=_checked(validation.cosine_threshold, "--threshold"),
         default=config_defaults.get("threshold"),
         help="Cosine similarity threshold for recognizing your voice. If not given, it's "
              "auto-calibrated per recording from the gap between speakers' similarity to "
@@ -152,7 +160,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--split-chars",
-        type=int,
+        type=_checked(validation.positive_int, "--split-chars"),
         default=config_defaults.get("split_chars"),
         help="If set, additionally splits transcript_clean.txt into parts no "
              "longer than the given number of characters (output/parts/part_N.txt) — "
@@ -160,7 +168,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--low-confidence-threshold",
-        type=float,
+        type=_checked(validation.logprob_threshold, "--low-confidence-threshold"),
         default=config_defaults.get("low_confidence_threshold", -0.5),
         help="avg_logprob threshold (usually between 0 and -1.5) below which a line "
              "in the annotated document is marked as low-confidence [?] (default: -0.5).",
@@ -182,7 +190,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--batch-size",
-        type=int,
+        type=_checked(validation.positive_int, "--batch-size"),
         default=config_defaults.get("batch_size"),
         help="Enable batched transcription (BatchedInferencePipeline) with the given "
              "batch size — speeds up processing of long lines, especially on GPU. "
