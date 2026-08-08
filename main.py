@@ -276,6 +276,9 @@ def _print_full_result(result: dict) -> None:
     if result.get("fluency") is not None:
         from voxlib.fluency import describe
         console.print(f"  Fluency: {escape(describe(result['fluency']))}")
+    if result.get("low_confidence_warning"):
+        console.print()
+        console.print(f"[bold yellow]Recording quality:[/] {escape(result['low_confidence_warning'])}")
 
 
 def _print_failed_files(failed_files: list[dict]) -> None:

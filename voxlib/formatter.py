@@ -31,6 +31,23 @@ class SourcedLine:
 DEFAULT_LOW_CONFIDENCE_THRESHOLD = -0.5
 
 
+def is_low_confidence(avg_logprob: Optional[float], threshold: float) -> bool:
+    """
+    The single definition of "whisper wasn't sure about this line".
+
+    Shared with voxlib/fluency.py, which excludes these lines from the fluency
+    metrics for the same reason the analysis workflow excludes them from
+    grammar judgment: a mis-recognized line says nothing about how the speaker
+    actually spoke. Two definitions of the same idea would let the [?] you see
+    in the document drift apart from the [?] the metrics acted on.
+
+    A missing avg_logprob counts as confident — that's how the annotated
+    document has always treated it, and inventing doubt where whisper reported
+    none would silently shrink the analyzable transcript.
+    """
+    return avg_logprob is not None and avg_logprob < threshold
+
+
 def _format_timestamp(seconds: float) -> str:
     total_seconds = int(seconds)
     hours, remainder = divmod(total_seconds, 3600)
@@ -53,11 +70,9 @@ def write_annotated_document(
                 current_source = line.source_file
                 f.write(f"\n=== {current_source} ===\n")
             ts = _format_timestamp(line.start)
-            is_low_confidence = (
-                line.avg_logprob is not None and line.avg_logprob < low_confidence_threshold
-            )
-            marker = " [?]" if is_low_confidence else ""
-            if is_low_confidence:
+            low_confidence = is_low_confidence(line.avg_logprob, low_confidence_threshold)
+            marker = " [?]" if low_confidence else ""
+            if low_confidence:
                 low_confidence_count += 1
             f.write(f"[{ts}]{marker} {line.text}\n")
 

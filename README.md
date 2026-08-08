@@ -215,12 +215,22 @@ Alongside the transcripts, every run measures:
 
 | Metric | Meaning |
 |---|---|
-| `fillers_per_100_words` | Hesitation sounds (`um`, `uh`, `erm`) per 100 words |
-| `words_per_minute` | Speaking rate across your own speech |
+| `low_confidence_share` | Fraction of lines whisper wasn't sure about (the `[?]` ones) |
+| `fillers_per_100_words` | Hesitation sounds (`um`, `uh`, `erm`) per 100 reliable words |
+| `words_per_minute` | Speaking rate across your own reliable speech |
 | `median_pause_sec`, `long_pauses` | Gaps between your consecutive lines — **solo recordings only** |
 
-Two deliberate choices worth knowing about:
+Three deliberate choices worth knowing about:
 
+- **Only lines whisper was confident about are counted.** A mis-recognized
+  line says nothing about how you actually spoke, so `[?]` lines are excluded
+  — the same rule the analysis workflow applies to grammar. This matters more
+  than it sounds: in this project's own history, one session had 60% of its
+  lines marked `[?]`, and 17 of its 20 "fillers" were inside them. Counted
+  over reliable lines, its apparent 10x jump in hesitation disappears.
+  `low_confidence_share` is reported alongside for exactly that reason, and
+  the run prints a warning when it goes above 40% — at that point the number
+  is describing your microphone, not your English.
 - **`uh-huh` and `mm-hmm` are not counted as hesitation.** They're backchannel
   agreement — the spoken equivalent of a nod — so counting them would say
   something about how much you were listening, not how much you hesitated.
@@ -228,7 +238,9 @@ Two deliberate choices worth knowing about:
 - **Pause statistics are only reported for solo recordings.** In a recording
   with other voices, the gap between two of your lines is mostly the other
   person talking, so the number would mean something different from file to
-  file. It comes back blank rather than misleading.
+  file. It comes back blank rather than misleading. (Unlike the word metrics,
+  these do use every line — a timestamp is valid even when the words on it
+  weren't recognized.)
 
 The filler rate is a **lower bound**: whisper discards many real hesitations
 before they reach the transcript, so treat it as "at least this much".

@@ -124,17 +124,40 @@ def test_empty_input_does_not_divide_by_zero():
     assert metrics.median_pause_sec is None
 
 
-def test_metrics_from_transcript_text_reports_no_timing_instead_of_guessing():
-    """Archived transcripts have no timestamps, so speaking rate and pauses
-    are genuinely unrecoverable — they must not be estimated."""
-    # "Uh I think uh so" is 5 words, 2 of them fillers.
-    metrics = fluency.metrics_from_transcript_text("Uh I think uh so " + " ".join(["word"] * 95))
+def test_metrics_from_annotated_text_reports_no_timing_instead_of_guessing():
+    """The annotated format records each line's start but not its end, so
+    speaking rate and pauses are genuinely unrecoverable — they must not be
+    estimated from the gaps between starts, which would conflate a pause with
+    how long the previous line took to say."""
+    annotated = "\n".join([
+        "=== call.webm ===",
+        "[00:00:00] Uh I think uh so " + " ".join(["word"] * 95),
+    ])
+
+    metrics = fluency.metrics_from_annotated_text(annotated)
 
     assert metrics.total_words == 100
     assert metrics.filler_count == 2
     assert metrics.fillers_per_100_words == 2.0
     assert metrics.words_per_minute == 0.0
     assert metrics.median_pause_sec is None
+
+
+def test_metrics_from_annotated_text_excludes_low_confidence_lines():
+    annotated = "\n".join([
+        "=== call.webm ===",
+        "[00:00:00] uh a reliable line with words",
+        "[00:00:05] [?] uh uh uh a garbled one",
+    ])
+
+    metrics = fluency.metrics_from_annotated_text(annotated)
+
+    assert metrics.total_lines == 2
+    assert metrics.low_confidence_lines == 1
+    assert metrics.low_confidence_share == 0.5
+    assert metrics.total_words == 12          # both lines
+    assert metrics.reliable_words == 6        # only the first
+    assert metrics.filler_count == 1          # the three "uh"s in [?] don't count
 
 
 def test_append_history_writes_a_header_once_then_appends(tmp_path: Path):
@@ -206,15 +229,125 @@ def test_backchannel_is_not_counted_as_hesitation():
     assert fluency.count_fillers(text) == 1
 
 
-def test_reproduces_the_hand_counted_history_of_this_project():
+def test_backchannel_and_low_confidence_are_both_excluded_together():
     """
-    Guards continuity of the tracked series: these are the real archived
-    session texts' counts, and the values already recorded in
-    analysis/scores_history.csv for them. If a change to the pattern ever
-    breaks this, the metric has silently become a different metric.
+    The shape of a real session in this project: plenty of "Uh-huh"/"Mm-hmm"
+    acknowledgment (agreement, not hesitation) plus a run of garbled short
+    lines that whisper flagged. Only the one genuine hesitation on a reliable
+    line should register.
     """
-    session = "Uh-huh. " * 7 + "Mm-hmm. " * 32 + "I, uh, skydive. " + " ".join(["word"] * 50)
+    annotated = "\n".join(
+        ["=== part_01.webm ==="]
+        + [f"[00:00:{i:02d}] Uh-huh." for i in range(7)]
+        + [f"[00:01:{i:02d}] Mm-hmm." for i in range(32)]
+        + ["[00:02:00] I, uh, skydive."]
+        + [f"[00:03:{i:02d}] [?] uh uh" for i in range(10)]
+    )
 
-    metrics = fluency.metrics_from_transcript_text(session)
+    metrics = fluency.metrics_from_annotated_text(annotated)
 
     assert metrics.filler_count == 1
+    assert metrics.low_confidence_lines == 10
+
+
+def test_low_confidence_lines_do_not_inflate_the_filler_rate():
+    """
+    This is the 2026-08-06 case, reduced: nearly every "filler" sat inside a
+    line whisper wasn't sure about, which read as a sudden fluency collapse
+    when it was really the audio degrading. Counted over reliable lines, the
+    session is unremarkable.
+    """
+    annotated = "\n".join(
+        ["=== part_01.webm ==="]
+        + [f"[00:00:{i:02d}] [?] uh uh uh" for i in range(17)]
+        + ["[00:01:00] uh " + " ".join(["word"] * 99)]
+    )
+
+    metrics = fluency.metrics_from_annotated_text(annotated)
+
+    assert metrics.filler_count == 1               # not 18
+    assert metrics.fillers_per_100_words == 1.0    # denominator is reliable words too
+    assert metrics.low_confidence_share == 0.944
+
+
+def _scored(start, end, text, avg_logprob):
+    return SourcedLine(source_file="a.webm", start=start, end=end, text=text, avg_logprob=avg_logprob)
+
+
+def test_live_metrics_exclude_low_confidence_lines():
+    """Same rule as the archived path, applied to the run's own lines: the
+    threshold is whatever produced the [?] markers in the document, so the
+    metrics and the markers can't disagree about which lines counted."""
+    lines = [
+        _scored(0.0, 30.0, "uh " + " ".join(["word"] * 29), avg_logprob=-0.1),
+        _scored(30.0, 60.0, "uh uh uh garbled", avg_logprob=-0.9),
+    ]
+
+    metrics = fluency.compute_fluency(
+        lines, use_diarization=False, fillers_removed=False, low_confidence_threshold=-0.5,
+    )
+
+    assert metrics.low_confidence_lines == 1
+    assert metrics.total_words == 34
+    assert metrics.reliable_words == 30
+    assert metrics.filler_count == 1
+    # 30 reliable words over the 0.5 min of reliable speech, not 34 over 1.0.
+    assert metrics.words_per_minute == 60.0
+
+
+def test_a_missing_logprob_counts_as_confident():
+    """Mirrors write_annotated_document: no score means no [?] marker, so
+    inventing doubt here would shrink the analyzable transcript silently."""
+    lines = [_scored(0.0, 60.0, "I think so", avg_logprob=None)]
+
+    metrics = fluency.compute_fluency(
+        lines, use_diarization=False, fillers_removed=False, low_confidence_threshold=-0.5,
+    )
+
+    assert metrics.low_confidence_lines == 0
+    assert metrics.reliable_words == 3
+
+
+def test_pauses_still_use_every_line_including_uncertain_ones():
+    """A timestamp is valid whether or not the words on it were recognized."""
+    lines = [
+        _scored(0.0, 1.0, "first", avg_logprob=-0.1),
+        _scored(2.0, 3.0, "mumbled", avg_logprob=-0.9),
+        _scored(4.0, 5.0, "third", avg_logprob=-0.1),
+    ]
+
+    metrics = fluency.compute_fluency(
+        lines, use_diarization=False, fillers_removed=False, low_confidence_threshold=-0.5,
+    )
+
+    assert metrics.median_pause_sec == 1.0  # both gaps counted
+
+
+def test_warning_fires_only_above_the_share_threshold():
+    def metrics_with(share_numerator, total):
+        lines = (
+            [_scored(float(i), i + 1.0, "bad", -0.9) for i in range(share_numerator)]
+            + [_scored(float(i + 100), i + 101.0, "good", -0.1)
+               for i in range(total - share_numerator)]
+        )
+        return fluency.compute_fluency(
+            lines, use_diarization=False, fillers_removed=False, low_confidence_threshold=-0.5,
+        )
+
+    assert fluency.warn_if_unreliable(metrics_with(6, 10)) is not None   # 60%, the 2026-08-06 case
+    assert fluency.warn_if_unreliable(metrics_with(3, 10)) is None       # 30%, the sessions before it
+    assert fluency.warn_if_unreliable(metrics_with(0, 0)) is None        # no lines, nothing to say
+
+
+def test_warning_explains_it_is_about_the_recording_not_the_speaker():
+    lines = [_scored(float(i), i + 1.0, "bad", -0.9) for i in range(9)] + [
+        _scored(100.0, 101.0, "good", -0.1)
+    ]
+    metrics = fluency.compute_fluency(
+        lines, use_diarization=False, fillers_removed=False, low_confidence_threshold=-0.5,
+    )
+
+    warning = fluency.warn_if_unreliable(metrics)
+
+    assert "recording-quality signal, not a speaking one" in warning
+    assert "90%" in warning

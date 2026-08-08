@@ -12,20 +12,37 @@ stops the next session from drawing the line somewhere slightly different.
 Here it's executable, so the series can't quietly change meaning underneath
 itself. test_fluency.py pins the reproduction.
 
+**Word-based metrics count only lines whisper was confident about** (the ones
+without a `[?]` marker in the annotated document). This mirrors the rule the
+analysis workflow already applies to grammar — a mis-recognized line says
+nothing about how the speaker actually spoke — and it is not a detail. In this
+project's own history, 17 of the 20 "fillers" in the 2026-08-06 session sat
+inside `[?]` lines, and that session's low-confidence share was 60% against
+24-30% before it. Counted over reliable lines only, the filler series reads
+1 / 0 / 3 rather than 1 / 1 / 20: what looked like a sharp regression in
+fluency was the recording quality falling over.
+
+Which is why `low_confidence_share` is itself reported and tracked. When it
+moves, every other number here changes meaning, and a metric that can quietly
+switch populations underneath a trend line is worse than no metric.
+
 What's measured:
 
-  - **Filler rate** — pure pause sounds (um/uh/erm) per 100 words, using the
-    same pattern --remove-fillers strips (see filler_filter.py), so the metric
-    can never disagree with the cleanup. Note this is a LOWER BOUND on real
+  - **Filler rate** — pure pause sounds (um/uh/erm) per 100 reliable words,
+    using the same pattern --remove-fillers strips (see filler_filter.py), so
+    the metric can never disagree with the cleanup. A LOWER BOUND on real
     disfluency: whisper drops many hesitations before we ever see the text.
-  - **Speaking rate** — words per minute across your own speech only, since
-    the durations come from your segments. Comparable between solo and
-    diarized recordings.
-  - **Pauses** — gaps between your consecutive lines. Solo recordings only,
-    and deliberately so: in a diarized recording the gap between two of your
-    lines is mostly the other person talking, so the same number would mean
-    two different things depending on the recording, which is exactly the kind
-    of noise that makes a tracked metric worthless.
+  - **Speaking rate** — words per minute across your own reliable speech.
+    Comparable between solo and diarized recordings.
+  - **Low-confidence share** — what fraction of your lines whisper wasn't sure
+    about. A quality-of-input measure, not a quality-of-speech one: high
+    values mean the microphone, not the speaker.
+  - **Pauses** — gaps between your consecutive lines. Computed over ALL lines,
+    unlike the word metrics: a timestamp is valid whether or not the words on
+    it were recognized correctly. Solo recordings only, though, and
+    deliberately so: in a diarized recording the gap between two of your lines
+    is mostly the other person talking, so the same number would mean two
+    different things depending on the recording.
 """
 
 from __future__ import annotations
@@ -33,6 +50,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +58,7 @@ from statistics import median
 from typing import Optional
 
 from .filler_filter import FILLER_SOUND_PATTERN
+from .formatter import DEFAULT_LOW_CONFIDENCE_THRESHOLD, is_low_confidence
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +66,22 @@ logger = logging.getLogger(__name__)
 # rather than ordinary sentence spacing. Only meaningful for solo recordings.
 LONG_PAUSE_SEC = 2.0
 
+# Above this share of [?] lines, the recording is telling you about itself
+# rather than about the speaker: most of the transcript is excluded from
+# grammar judgment, and the word metrics rest on whatever is left.
+LOW_CONFIDENCE_WARN_SHARE = 0.4
+
 HISTORY_COLUMNS = [
     "run_at",
     "date",
     "origin",
     "mode",
     "files",
+    "total_lines",
+    "low_confidence_lines",
+    "low_confidence_share",
     "total_words",
+    "reliable_words",
     "speech_minutes",
     "words_per_minute",
     "filler_count",
@@ -65,7 +93,15 @@ HISTORY_COLUMNS = [
 
 @dataclass
 class FluencyMetrics:
+    total_lines: int
+    low_confidence_lines: int
+    # 0.0-1.0. Read this before reading anything else here: it says how much of
+    # the transcript the rest of the numbers are actually based on.
+    low_confidence_share: float
     total_words: int
+    # The denominator for every rate below — words on lines whisper was
+    # confident about.
+    reliable_words: int
     speech_minutes: float
     words_per_minute: float
     # None when --remove-fillers stripped them before we could count: reporting
@@ -118,23 +154,45 @@ def _pause_stats(lines) -> tuple[Optional[float], Optional[int]]:
     return round(median(gaps), 2), sum(1 for g in gaps if g > LONG_PAUSE_SEC)
 
 
-def compute_fluency(lines, *, use_diarization: bool, fillers_removed: bool) -> FluencyMetrics:
+def compute_fluency(
+    lines,
+    *,
+    use_diarization: bool,
+    fillers_removed: bool,
+    low_confidence_threshold: float = DEFAULT_LOW_CONFIDENCE_THRESHOLD,
+) -> FluencyMetrics:
+    reliable = [
+        line for line in lines
+        if not is_low_confidence(getattr(line, "avg_logprob", None), low_confidence_threshold)
+    ]
+    low_confidence_lines = len(lines) - len(reliable)
+    share = low_confidence_lines / len(lines) if lines else 0.0
+
     total_words = sum(count_words(line.text) for line in lines)
-    speech_sec = sum(line.end - line.start for line in lines)
-    speech_minutes = speech_sec / 60
+    reliable_words = sum(count_words(line.text) for line in reliable)
 
-    filler_count = None if fillers_removed else sum(count_fillers(line.text) for line in lines)
-    filler_rate = None if filler_count is None else _rate_per_100_words(filler_count, total_words)
+    # Duration from the reliable lines too, so the rate's numerator and
+    # denominator describe the same stretch of speech.
+    speech_minutes = sum(line.end - line.start for line in reliable) / 60
 
+    filler_count = None if fillers_removed else sum(count_fillers(line.text) for line in reliable)
+    filler_rate = None if filler_count is None else _rate_per_100_words(filler_count, reliable_words)
+
+    # Pauses come from timestamps, which are valid regardless of whether the
+    # words on them were recognized correctly — so they use every line.
     if use_diarization:
         median_pause, long_pauses = None, None
     else:
         median_pause, long_pauses = _pause_stats(lines)
 
     return FluencyMetrics(
+        total_lines=len(lines),
+        low_confidence_lines=low_confidence_lines,
+        low_confidence_share=round(share, 3),
         total_words=total_words,
+        reliable_words=reliable_words,
         speech_minutes=round(speech_minutes, 2),
-        words_per_minute=round(total_words / speech_minutes, 1) if speech_minutes > 0 else 0.0,
+        words_per_minute=round(reliable_words / speech_minutes, 1) if speech_minutes > 0 else 0.0,
         filler_count=filler_count,
         fillers_per_100_words=filler_rate,
         median_pause_sec=median_pause,
@@ -142,22 +200,73 @@ def compute_fluency(lines, *, use_diarization: bool, fillers_removed: bool) -> F
     )
 
 
-def metrics_from_transcript_text(text: str) -> FluencyMetrics:
+def warn_if_unreliable(metrics: FluencyMetrics) -> str | None:
     """
-    Fluency for an already-archived transcript, where only the words survive.
+    Returns a warning when so much of the transcript is low-confidence that the
+    session isn't comparable with the others — or None when it's fine.
 
-    Used to backfill history from analysis/sessions/*.txt: those files carry no
-    timing at all, so speaking rate and pauses are genuinely unrecoverable and
-    come back as zero/None rather than being estimated from line counts.
+    This is the check that would have caught 2026-08-06 at the time: 60% of
+    lines marked [?], against 24-30% in the sessions before it. Without it, the
+    resulting drop in every word-based number reads as the speaker getting
+    worse instead of the audio getting worse.
     """
-    total_words = count_words(text)
-    filler_count = count_fillers(text)
+    if metrics.total_lines == 0 or metrics.low_confidence_share < LOW_CONFIDENCE_WARN_SHARE:
+        return None
+    return (
+        f"{metrics.low_confidence_share:.0%} of your lines ({metrics.low_confidence_lines} of "
+        f"{metrics.total_lines}) were recognized with low confidence. That's a recording-quality "
+        f"signal, not a speaking one: the grammar analysis skips those lines entirely, and the "
+        f"numbers here rest on the {metrics.reliable_words} words that remain — so don't compare "
+        f"them against sessions with cleaner audio. Check the mic, the distance and the "
+        f"background noise before reading anything into this session's fluency."
+    )
+
+
+_ANNOTATED_LINE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)\](?P<marker>\s\[\?\])?\s*(?P<text>.*)$")
+
+
+def metrics_from_annotated_text(text: str) -> FluencyMetrics:
+    """
+    Fluency for an already-archived transcript, read from the ANNOTATED file.
+
+    Deliberately not the clean one: `transcript_clean.txt` carries no `[?]`
+    markers, so counting from it would silently include lines whisper got
+    wrong — the exact mistake that made 2026-08-06 look like a fluency
+    collapse. The annotated file is the only archived form that knows which
+    lines to trust.
+
+    Timing still can't be recovered: the annotated format records each line's
+    start but not its end, so speaking rate and pauses come back as zero/None
+    rather than being estimated from the gaps between starts (which would
+    conflate a pause with however long the previous line took to say).
+    """
+    total_lines = low_confidence_lines = 0
+    total_words = reliable_words = filler_count = 0
+
+    for raw in text.splitlines():
+        match = _ANNOTATED_LINE.match(raw.strip())
+        if not match:
+            continue  # "=== file.webm ===" headers and blank lines
+        total_lines += 1
+        line_text = match.group("text")
+        words = count_words(line_text)
+        total_words += words
+        if match.group("marker"):
+            low_confidence_lines += 1
+        else:
+            reliable_words += words
+            filler_count += count_fillers(line_text)
+
     return FluencyMetrics(
+        total_lines=total_lines,
+        low_confidence_lines=low_confidence_lines,
+        low_confidence_share=round(low_confidence_lines / total_lines, 3) if total_lines else 0.0,
         total_words=total_words,
+        reliable_words=reliable_words,
         speech_minutes=0.0,
         words_per_minute=0.0,
         filler_count=filler_count,
-        fillers_per_100_words=_rate_per_100_words(filler_count, total_words),
+        fillers_per_100_words=_rate_per_100_words(filler_count, reliable_words),
         median_pause_sec=None,
         long_pauses=None,
     )
@@ -246,4 +355,6 @@ def describe(metrics: FluencyMetrics) -> str:
     if metrics.median_pause_sec is not None:
         parts.append(f"median pause {metrics.median_pause_sec:.2f}s, "
                      f"{metrics.long_pauses} over {LONG_PAUSE_SEC:.0f}s")
+    # Last, but always present: it's the caveat on everything before it.
+    parts.append(f"{metrics.low_confidence_share:.0%} of lines low-confidence")
     return "; ".join(parts)

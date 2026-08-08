@@ -151,20 +151,36 @@ mistake — track it separately, don't fold it into the mistake categories above
 `analysis/fluency_history.csv` (see `voxlib/fluency.py`). Read the row for
 this session from there:
 
-- `fillers_per_100_words` — hesitation sounds per 100 words. "uh-huh" and
-  "mm-hmm" are backchannel agreement, not hesitation, and are deliberately
-  excluded, which is the same rule the earlier sessions applied by hand.
-  Treat the number as a **lower bound**: whisper drops many hesitations
-  before they ever reach the transcript.
-- `words_per_minute` — speaking rate across your own speech. Comparable
-  between solo and diarized recordings.
+- `low_confidence_share` — **read this first.** The fraction of lines
+  whisper wasn't sure about (the `[?]` ones). It measures the recording, not
+  the speaker. Every word-based number below is computed over the remaining
+  reliable lines only, so when this moves, the others change meaning.
+- `fillers_per_100_words` — hesitation sounds per 100 **reliable** words.
+  "uh-huh" and "mm-hmm" are backchannel agreement, not hesitation, and are
+  deliberately excluded. Treat the number as a **lower bound**: whisper drops
+  many hesitations before they ever reach the transcript.
+- `words_per_minute` — speaking rate across your own reliable speech.
+  Comparable between solo and diarized recordings.
 - `median_pause_sec` / `long_pauses` — **solo recordings only.** Blank for
   diarized ones, because there the gap between two of your lines is mostly
-  the other person's turn.
+  the other person's turn. (These use every line, not just reliable ones — a
+  timestamp is valid even when the words on it weren't recognized.)
 
 Compare against the previous rows in `analysis/fluency_history.csv` for the
 trend. An empty cell means "not measured", never zero — if a metric is blank,
 say it wasn't measurable this session rather than reporting 0.
+
+**If `low_confidence_share` is 0.4 or higher, or has moved sharply since the
+last sessions, say so explicitly in the session report and do NOT read a
+fluency trend out of it.** At that level most of the transcript is excluded
+from grammar judgment too, so the session is a smaller and different sample
+than the ones before it — a drop in any score would be describing the
+microphone. Recommend re-recording (mic distance, background noise) instead
+of drawing conclusions. This has already happened once: on 2026-08-06 the
+share hit 60% against 24-30% before, 17 of the 20 counted "fillers" sat
+inside `[?]` lines, and the resulting "10x jump in hesitation" was an
+artifact — the reliable-line series for those three sessions is
+0.05 / 0.00 / 0.12, essentially flat.
 
 If the file or the row is missing (an older recording processed before this
 existed, say), you may fall back to counting from

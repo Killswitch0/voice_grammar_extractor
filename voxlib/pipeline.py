@@ -577,8 +577,18 @@ def run_pipeline(
     processed_files = len(input_files) - len(failed_files)
     metrics = fluency.compute_fluency(
         all_lines, use_diarization=use_diarization, fillers_removed=remove_fillers,
+        low_confidence_threshold=low_confidence_threshold,
     )
     logger.info("Fluency: %s", fluency.describe(metrics))
+
+    # A recording where most lines came back uncertain says more about the
+    # microphone than about the speaker, and every number above rests on
+    # whatever is left — worth saying out loud rather than leaving to be
+    # noticed later as an unexplained regression.
+    unreliable_warning = fluency.warn_if_unreliable(metrics)
+    if unreliable_warning:
+        logger.warning("%s", unreliable_warning)
+        result["low_confidence_warning"] = unreliable_warning
     fluency.write_json(output_dir / "fluency.json", metrics, mode=mode, files=processed_files)
     result["fluency"] = metrics
     if fluency_log is not None:
