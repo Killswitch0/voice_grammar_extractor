@@ -38,8 +38,9 @@ Two stages:
  │  Identify    │ ──> │  Transcribe  │ ──> │   Format     │ ──> │ transcript_clean  │
  │  "which one  │     │  only YOUR   │     │  chronologi- │     │ transcript_annot- │
  │  voice is    │     │   lines      │     │  cal order + │     │ ated (with [?])   │
- │   yours"     │     │  (whisper)   │     │  [?] markers │     │ fluency.json      │
- └──────────────┘     └──────────────┘     └──────────────┘     └───────────────────┘
+ │   yours"     │     │  (whisper)   │     │  [?] markers │     │ lines.json        │
+ └──────────────┘     └──────────────┘     └──────────────┘     │ fluency.json      │
+                                                                └───────────────────┘
 ```
 
 | Step | Tool | What it answers |
@@ -49,7 +50,7 @@ Two stages:
 | 3. Merge segments | this tool | "Which of those cuts were mid-sentence pauses rather than real turn boundaries?" |
 | 4. Identify | cosine similarity vs. your reference voice sample | "Which speaker is *me*?" |
 | 5. Transcribe | `faster-whisper` | "What did *my* segments actually say?" |
-| 6. Format | this tool | "Put it in chronological order, one line per line, plus a `[?]` marker on low-confidence lines" |
+| 6. Format | this tool | "Put it in chronological order, one line per line, plus a `[?]` marker on low-confidence lines — and the same lines structured in `lines.json`" |
 | 7. Measure fluency | this tool | "How fast, how hesitant, how much pausing?" — written to `fluency.json` (see `voxlib/fluency.py`) |
 
 If it's just you talking (a journal, a monologue) — steps 2 through 4 are
@@ -60,10 +61,11 @@ file, where whisper does its own splitting by pauses.
 
 ```
  ┌───────────────────┐     ┌───────────────────┐     ┌────────────────────┐
- │ transcript_clean  │ ──> │ Claude Code       │ ──> │ analysis/sessions/ │
- │ + annotated (from │     │ reads CLAUDE.md,  │     │ YYYY-MM-DD.md      │
- │  Stage 1)         │     │ analyzes grammar, │     │ (this session's    │
- │                   │     │ compares against  │     │  coaching report)  │
+ │ lines.json        │ ──> │ Claude Code       │ ──> │ analysis/sessions/ │
+ │ (+ fluency.json,  │     │ reads CLAUDE.md,  │     │ YYYY-MM-DD.md      │
+ │  from Stage 1)    │     │ skips the low-    │     │ (this session's    │
+ │                   │     │ confidence lines, │     │  coaching report)  │
+ │                   │     │ compares against  │     │                    │
  │                   │     │ memory.md         │     │                    │
  └───────────────────┘     └─────────┬─────────┘     └────────────────────┘
                                      │
@@ -123,9 +125,16 @@ of your English improving (or not) over time.
   would look like two separate one-off mistakes instead of one recurring
   pattern. `CLAUDE.md` explicitly requires reusing existing category names
   from `memory.md`.
-- **`[?]`-marked lines are excluded from grammar judgment** — the coaching
-  workflow reads `transcript_annotated.txt` specifically to know which lines
-  are low-confidence transcription, not genuine mistakes, before scoring anything.
+- **`[?]`-marked lines are excluded from grammar judgment** — a line whisper
+  wasn't sure it heard can't tell you anything about how it was spoken, so
+  scoring one risks inventing a mistake that was never made. The coaching
+  workflow reads `lines.json`, where that flag sits on the line itself: the
+  two text documents each carry only half of what's needed (sentences in one,
+  markers in the other) and don't align one-to-one, and a rule this important
+  shouldn't rest on matching them up by eye every session. The same file's
+  totals also say how much of the session had to be discarded — past 40%,
+  the session is a different and much smaller sample than the ones before it,
+  and isn't comparable with them.
 - **Regressions are tracked distinctly, not just re-added** — a mistake
   that was marked "improved" and then reappears is a different, more
   important signal than a mistake showing up for the first time. It gets

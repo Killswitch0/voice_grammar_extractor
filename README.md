@@ -179,7 +179,7 @@ python main.py monologue.mp4 --no-diarization -o output/
 
 ## Output
 
-Three files will appear in the output folder:
+Four files will appear in the output folder:
 
 - **`transcript_annotated.txt`** — with timestamps and the source file name, for your review:
   ```
@@ -194,6 +194,25 @@ Three files will appear in the output folder:
   This is the file you paste into an AI with a prompt like:
   > "Here's a list of my spoken lines in English. Analyze the grammar, find
   > the most frequently repeated mistakes, and group them by type."
+
+- **`lines.json`** — the same lines, structured: each one with its source
+  file, timing, whisper confidence score and a `low_confidence` flag, plus
+  precomputed totals.
+  ```json
+  {
+    "index": 1,
+    "source_file": "call.webm",
+    "start": 6.1, "end": 7.0, "timestamp": "00:00:06",
+    "text": "Yes.",
+    "avg_logprob": -0.88,
+    "low_confidence": true
+  }
+  ```
+  The two text files each hold half of what an analysis needs — the sentences
+  in one, the `[?]` markers saying which to trust in the other — and they
+  don't even line up one-to-one, since the annotated file has `=== file ===`
+  headers the clean one doesn't. This puts both halves on every line so
+  nothing has to be matched up by hand.
 
 - **`fluency.json`** — the run's fluency measurement: hesitation fillers per
   100 words, speaking rate, and (solo recordings only) pause statistics.

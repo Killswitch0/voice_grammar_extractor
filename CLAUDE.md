@@ -45,11 +45,26 @@ their rules together in one response.
 # General rules
 
 1. Ignore likely speech-to-text transcription errors, not genuine mistakes.
-   **Any line marked `[?]` in `transcript_annotated.txt` is a low-confidence
-   Whisper recognition** (see `HOW_IT_WORKS.md`) — exclude those lines from
-   grammar judgment entirely rather than guessing whether the "mistake" is
-   real or a mis-transcription. Cross-check `transcript_annotated.txt` for
-   this before finalizing your mistake list from `transcript_clean.txt`.
+   **Read `analysis/sessions/YYYY-MM-DD.lines.json` and skip every line with
+   `"low_confidence": true`** — whisper wasn't sure it heard those correctly
+   (see `HOW_IT_WORKS.md`), so a "mistake" in one may never have been
+   spoken. Exclude them from grammar judgment entirely rather than guessing.
+   Quote from `text` in that file; it is the same text as
+   `transcript_clean.txt`, with the confidence flag attached to each line
+   instead of living in a separate document you have to align by hand.
+   The archived `.annotated.txt` (with `[?]` markers) is still there for when
+   you want to read a stretch of the session with your eyes.
+
+   Sessions archived before this file existed only have the two `.txt` files —
+   there, fall back to reading the `[?]` markers out of the `.annotated.txt`
+   directly, and note in the report that you did.
+
+   `totals.low_confidence_lines` / `totals.lines` in that file is how much of
+   the session you had to throw away. **If it's 40% or more, say so plainly
+   at the top of the report** — you are reviewing a fraction of what was
+   said, and every count below (occurrences, "most repeated mistake") is
+   drawn from that fraction, so it isn't comparable with other sessions.
+   Recommend re-recording rather than reading a trend into it.
 2. Ignore accidental one-off slips unless they repeat across sessions.
 3. Focus on recurring patterns over isolated mistakes.
 4. Prioritize mistakes that actually affect communication over tiny stylistic details.
@@ -103,17 +118,23 @@ slow transcription on an unverified split):
 ```
 If there's no saved reference sample yet, run `./identify.sh recordings/<filename>` first.
 
-Either way, this overwrites `output/transcript_clean.txt` and
-`output/transcript_annotated.txt`. If already processed, skip to step 2.
+Either way, this overwrites `output/transcript_clean.txt`,
+`output/transcript_annotated.txt`, `output/lines.json` and
+`output/fluency.json`. If already processed, skip to step 2.
 
 ## 2. Archive today's transcript
 
-`output/transcript_clean.txt` gets overwritten on every run, so before
-analyzing, copy both output files into dated session files:
+Everything in `output/` gets overwritten on every run, so before analyzing,
+copy this session's files into dated ones:
 ```bash
 cp output/transcript_clean.txt analysis/sessions/YYYY-MM-DD.txt
 cp output/transcript_annotated.txt analysis/sessions/YYYY-MM-DD.annotated.txt
+cp output/lines.json analysis/sessions/YYYY-MM-DD.lines.json
 ```
+The `.lines.json` copy is the one you actually analyze from (see rule 1): it
+carries each line's confidence flag, source file and timing together, so
+nothing has to be cross-referenced by hand. Archiving it also means a past
+session can be re-measured later without re-running whisper.
 Use today's actual date. If a session already exists for today, ask the
 owner whether to append or replace — never silently overwrite past analysis.
 
@@ -540,7 +561,11 @@ don't invent a different layout.
 ```
 recordings/            raw audio/video files (owner drops files here)
 voice_reference/       my_reference.wav — PERMANENT, not overwritten by runs
-output/                 transcript_clean.txt + transcript_annotated.txt (overwritten each run)
+output/                 all overwritten on every run:
+  transcript_clean.txt      just the lines, one per line
+  transcript_annotated.txt  timestamps, source file, [?] markers — for reading by eye
+  lines.json                the same lines with per-line confidence/timing — analyze from this
+  fluency.json              this run's fluency measurement
 analysis/
   memory.md              the persistent, cross-session tracker — read/update every session
   memory_archive.md      long-resolved mistakes, moved out of memory.md to keep it short
@@ -558,5 +583,6 @@ analysis/
   sessions/
     YYYY-MM-DD.txt              archived raw clean transcript for that day
     YYYY-MM-DD.annotated.txt    archived annotated transcript (has the [?] markers)
+    YYYY-MM-DD.lines.json       archived machine-readable lines — what rule 1 reads
     YYYY-MM-DD.md                that day's full session report (Parts above)
 ```

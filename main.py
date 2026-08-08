@@ -274,6 +274,8 @@ def _print_full_result(result: dict) -> None:
     console.print("[bold green]Done![/]")
     console.print(f"  Annotated document: [cyan]{escape(str(result['annotated']))}[/]")
     console.print(f"  Clean text for AI:  [cyan]{escape(str(result['clean']))}[/]")
+    if result.get("lines_json"):
+        console.print(f"  Lines + confidence: [cyan]{escape(str(result['lines_json']))}[/]")
     if result.get("parts"):
         console.print(f"  Parts for AI ({len(result['parts'])}): [cyan]{escape(str(result['parts'][0].parent))}/[/]")
     stats = result.get("stats", {})

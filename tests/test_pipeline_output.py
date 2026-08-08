@@ -272,6 +272,30 @@ def test_fluency_is_measured_and_logged_by_the_run_itself(tmp_path, monkeypatch)
     assert row["fillers_per_100_words"] == "1.67"
 
 
+def test_run_writes_lines_json_alongside_the_text_documents(tmp_path, monkeypatch):
+    import json
+
+    output_dir = tmp_path / "output"
+    input_file = tmp_path / "rec.wav"
+    input_file.write_bytes(b"fake recording bytes")
+
+    result = _run_solo_pipeline(
+        tmp_path, monkeypatch,
+        FakeSoloTranscriber([
+            TranscribedLine(start=0.0, end=2.0, text="a clear sentence", avg_logprob=-0.1),
+            TranscribedLine(start=3.0, end=4.0, text="mumbled", avg_logprob=-0.9),
+        ]),
+        input_path=input_file, output_dir=output_dir, low_confidence_threshold=-0.5,
+    )
+
+    payload = json.loads(result["lines_json"].read_text(encoding="utf-8"))
+    assert [line["low_confidence"] for line in payload["lines"]] == [False, True]
+    assert payload["totals"]["reliable_words"] == 3
+    assert payload["low_confidence_threshold"] == -0.5
+    # The run's own threshold, not the default, is what got applied and recorded.
+    assert payload["lines"][0]["source_file"] == "rec.wav"
+
+
 def test_no_fluency_history_is_written_when_no_path_is_given(tmp_path, monkeypatch):
     # The analysis/ workspace doesn't exist for anyone using the extractor on
     # its own, and the run must not conjure one.

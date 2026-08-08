@@ -38,6 +38,7 @@ from .formatter import (
     SourcedLine,
     write_annotated_document,
     write_clean_document,
+    write_lines_json,
     write_split_documents,
     DEFAULT_LOW_CONFIDENCE_THRESHOLD,
 )
@@ -634,11 +635,13 @@ def run_pipeline(
 
     annotated_path = output_dir / "transcript_annotated.txt"
     clean_path = output_dir / "transcript_clean.txt"
+    lines_json_path = output_dir / "lines.json"
 
     write_annotated_document(all_lines, annotated_path, low_confidence_threshold=low_confidence_threshold)
     write_clean_document(all_lines, clean_path)
+    write_lines_json(all_lines, lines_json_path, low_confidence_threshold=low_confidence_threshold)
 
-    result: dict = {"annotated": annotated_path, "clean": clean_path}
+    result: dict = {"annotated": annotated_path, "clean": clean_path, "lines_json": lines_json_path}
     if failed_files:
         result["failed_files"] = failed_files
 
@@ -677,5 +680,6 @@ def run_pipeline(
     logger.info("Done. Total lines: %d", len(all_lines))
     logger.info("Annotated document: %s", annotated_path)
     logger.info("Clean document (for AI): %s", clean_path)
+    logger.info("Machine-readable lines: %s", lines_json_path)
 
     return result
