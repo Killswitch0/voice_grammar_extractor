@@ -188,7 +188,10 @@ Four files will appear in the output folder:
   [00:01:03] [?] This is a mumbled sentence
   ```
   The `[?]` marker means a low-confidence line (unclear diction/noise);
-  double-check it against the original before trusting its grammar.
+  double-check it against the original before trusting its grammar. A `[>]`
+  marker means the recording was cut mid-sentence just before this line —
+  read it together with the last line of the previous file (see "Sentences cut
+  across files" below).
 
 - **`transcript_clean.txt`** — just the lines, one per line, nothing else.
   This is the file you paste into an AI with a prompt like:
@@ -251,6 +254,35 @@ window size.
 
 The raw segments are what gets cached, so you can retune `--merge-gap` and
 re-run without paying for diarization again.
+
+## Sentences cut across files
+
+A long session usually gets recorded in parts, and the recorder cuts on a
+timer rather than on a full stop. The tail of one file and the head of the
+next are then one sentence torn in half — and the surviving half looks exactly
+like a grammar mistake that was never made:
+
+```
+=== part_01.webm ===
+[00:04:57] So, and I just...
+
+=== part_02.webm ===
+[00:00:00] [>] understand that I'm a little bit struggling with speaking.
+```
+
+Read alone, `understand that I'm...` has no subject. Across this project's
+first three sessions that pattern appeared at 8 of 54 file boundaries.
+
+Such lines get a `[>]` marker in the annotated document and
+`"continues_previous": true` in `lines.json` (with `"continued_in_next"` on
+the other half), so both pieces can be judged as the single sentence they are.
+Detection needs the previous file to end without terminal punctuation *and*
+the next to begin lowercase — either signal alone fires on ordinary
+turn-taking.
+
+The halves are flagged, never joined: whether two files are really consecutive
+parts of one recording is something only you know, and stitching unrelated
+recordings together would invent a sentence nobody said.
 
 ## Fluency measurement
 

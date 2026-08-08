@@ -50,6 +50,56 @@ def is_low_confidence(avg_logprob: Optional[float], threshold: float) -> bool:
     return avg_logprob is not None and avg_logprob < threshold
 
 
+# A trailing "..." is the strongest sign of an utterance that was cut off, so
+# it counts as unfinished rather than as terminal punctuation — the mistake
+# that hid the clearest real example ("So, and I just..." continuing into the
+# next file) when this was first measured.
+_TERMINAL_PUNCTUATION = (".", "!", "?")
+
+
+def _looks_unfinished(text: str) -> bool:
+    stripped = text.rstrip()
+    if not stripped or stripped.endswith("...") or stripped.endswith("…"):
+        return True
+    return not stripped.endswith(_TERMINAL_PUNCTUATION)
+
+
+def _looks_like_a_continuation(text: str) -> bool:
+    stripped = text.lstrip()
+    return bool(stripped) and stripped[0].islower()
+
+
+def detect_split_sentences(lines: list[SourcedLine]) -> list[bool]:
+    """
+    Flags lines that open a new source file mid-sentence.
+
+    A long session is usually recorded in parts, and the recorder cuts on a
+    timer, not on a full stop. The tail of one file and the head of the next
+    are then one sentence torn in half — and the half that survives on its own
+    looks exactly like a grammar mistake that was never made: "So, and I
+    just..." followed, in the next file, by "understand that I'm a little bit
+    struggling" reads as a missing subject. Across this project's first three
+    sessions that happened at 8 of 54 file boundaries.
+
+    Only file boundaries are considered. Within a file the lines are
+    contiguous and their timestamps show it; at a boundary the clock resets to
+    zero and the two halves look unrelated.
+
+    Both conditions are required — the previous file ending unfinished AND
+    this one starting lowercase — because either alone fires on ordinary
+    turn-taking ("Yeah, maybe it was wrong." followed by "uh-huh" is not a
+    split sentence).
+    """
+    flags = [False] * len(lines)
+    for index in range(1, len(lines)):
+        previous, current = lines[index - 1], lines[index]
+        if current.source_file == previous.source_file:
+            continue
+        if _looks_unfinished(previous.text) and _looks_like_a_continuation(current.text):
+            flags[index] = True
+    return flags
+
+
 def _format_timestamp(seconds: float) -> str:
     total_seconds = int(seconds)
     hours, remainder = divmod(total_seconds, 3600)
@@ -64,16 +114,21 @@ def write_annotated_document(
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     low_confidence_count = 0
+    continues = detect_split_sentences(lines)
 
     with output_path.open("w", encoding="utf-8") as f:
         current_source = None
-        for line in lines:
+        for index, line in enumerate(lines):
             if line.source_file != current_source:
                 current_source = line.source_file
                 f.write(f"\n=== {current_source} ===\n")
             ts = _format_timestamp(line.start)
             low_confidence = is_low_confidence(line.avg_logprob, low_confidence_threshold)
-            marker = " [?]" if low_confidence else ""
+            # [>] means the recording was cut here, not that the speaker
+            # stopped: read this line together with the last one above the
+            # header before judging it.
+            marker = " [>]" if continues[index] else ""
+            marker += " [?]" if low_confidence else ""
             if low_confidence:
                 low_confidence_count += 1
             f.write(f"[{ts}]{marker} {line.text}\n")
@@ -110,6 +165,10 @@ def write_lines_json(
     still be found there by eye when a human wants to look.
     """
     low_confidence_flags = [is_low_confidence(line.avg_logprob, low_confidence_threshold) for line in lines]
+    continues = detect_split_sentences(lines)
+    # The line before a continuation is the other half of the same sentence,
+    # and is just as unjudgeable on its own.
+    continued = [continues[i + 1] if i + 1 < len(lines) else False for i in range(len(lines))]
 
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -117,6 +176,7 @@ def write_lines_json(
         "totals": {
             "lines": len(lines),
             "low_confidence_lines": sum(low_confidence_flags),
+            "split_sentences": sum(continues),
             "words": sum(len(line.text.split()) for line in lines),
             "reliable_words": sum(
                 len(line.text.split())
@@ -133,8 +193,14 @@ def write_lines_json(
                 "text": line.text,
                 "avg_logprob": line.avg_logprob,
                 "low_confidence": low,
+                # The recording was cut mid-sentence here — see
+                # detect_split_sentences. Judge the pair as one utterance.
+                "continues_previous": cont,
+                "continued_in_next": cont_next,
             }
-            for index, (line, low) in enumerate(zip(lines, low_confidence_flags))
+            for index, (line, low, cont, cont_next) in enumerate(
+                zip(lines, low_confidence_flags, continues, continued)
+            )
         ],
     }
 

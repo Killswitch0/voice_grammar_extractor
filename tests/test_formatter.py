@@ -3,6 +3,7 @@ from pathlib import Path
 
 from voxlib.formatter import (
     SourcedLine,
+    detect_split_sentences,
     write_annotated_document,
     write_clean_document,
     write_lines_json,
@@ -160,3 +161,100 @@ def test_lines_json_handles_non_ascii_text(tmp_path: Path):
     )
 
     assert json.loads(path.read_text(encoding="utf-8"))["lines"][0]["text"] == "naïve café — déjà vu"
+
+
+def _split_across_files() -> list[SourcedLine]:
+    """The real shape from this project's archive: a session recorded in
+    parts, where the recorder cut on a timer in the middle of a sentence."""
+    return [
+        SourcedLine("part_01.webm", 297.0, 299.0, "So, and I just...", avg_logprob=-0.3),
+        SourcedLine("part_02.webm", 0.0, 9.0, "understand that I'm struggling.", avg_logprob=-0.25),
+    ]
+
+
+def test_split_sentence_across_files_is_detected():
+    """
+    "understand that I'm struggling" on its own reads as a missing subject —
+    a grammar mistake that was never made. It's the tail of the previous
+    file's sentence.
+    """
+    assert detect_split_sentences(_split_across_files()) == [False, True]
+
+
+def test_a_trailing_ellipsis_counts_as_unfinished():
+    """It ends in a period, but "..." is the strongest sign of being cut off.
+    Treating it as terminal punctuation hid the clearest real case."""
+    lines = [
+        SourcedLine("a.webm", 0.0, 1.0, "so I have a...", avg_logprob=-0.2),
+        SourcedLine("b.webm", 0.0, 1.0, "basic understanding of it", avg_logprob=-0.2),
+    ]
+
+    assert detect_split_sentences(lines) == [False, True]
+
+
+def test_ordinary_turn_taking_across_files_is_not_flagged():
+    """Both halves of the test are needed: a finished sentence followed by a
+    lowercase backchannel is not a split sentence, and firing there would
+    excuse real mistakes from review."""
+    finished_then_lowercase = [
+        SourcedLine("a.webm", 0.0, 1.0, "Yeah, maybe it was wrong.", avg_logprob=-0.2),
+        SourcedLine("b.webm", 0.0, 1.0, "uh-huh", avg_logprob=-0.2),
+    ]
+    unfinished_then_capital = [
+        SourcedLine("a.webm", 0.0, 1.0, "a topic to discuss", avg_logprob=-0.2),
+        SourcedLine("b.webm", 0.0, 1.0, "Thank you.", avg_logprob=-0.2),
+    ]
+
+    assert detect_split_sentences(finished_then_lowercase) == [False, False]
+    assert detect_split_sentences(unfinished_then_capital) == [False, False]
+
+
+def test_mid_file_lines_are_never_flagged():
+    """Within one file the lines are contiguous and their timestamps show it.
+    Only a file boundary resets the clock and hides the connection."""
+    lines = [
+        SourcedLine("a.webm", 0.0, 1.0, "I was looking for", avg_logprob=-0.2),
+        SourcedLine("a.webm", 1.2, 3.0, "new movies", avg_logprob=-0.2),
+    ]
+
+    assert detect_split_sentences(lines) == [False, False]
+
+
+def test_split_sentences_are_marked_in_the_annotated_document(tmp_path: Path):
+    path = tmp_path / "annotated.txt"
+
+    write_annotated_document(_split_across_files(), path, low_confidence_threshold=-0.5)
+
+    text = path.read_text(encoding="utf-8")
+    assert "[>] understand that I'm struggling." in text
+    assert "[>] So, and I just..." not in text
+
+
+def test_both_markers_can_appear_on_one_line(tmp_path: Path):
+    lines = [
+        SourcedLine("a.webm", 0.0, 1.0, "and then I...", avg_logprob=-0.2),
+        SourcedLine("b.webm", 0.0, 1.0, "went there", avg_logprob=-0.9),
+    ]
+    path = tmp_path / "annotated.txt"
+
+    write_annotated_document(lines, path, low_confidence_threshold=-0.5)
+
+    assert "[>] [?] went there" in path.read_text(encoding="utf-8")
+
+
+def test_lines_json_flags_both_halves_of_a_split_sentence(tmp_path: Path):
+    path = tmp_path / "lines.json"
+
+    write_lines_json(_split_across_files(), path, low_confidence_threshold=-0.5)
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["totals"]["split_sentences"] == 1
+    # The tail knows it continues; the head knows it was continued. Either one
+    # alone is unjudgeable, so both have to say so.
+    assert [line["continues_previous"] for line in payload["lines"]] == [False, True]
+    assert [line["continued_in_next"] for line in payload["lines"]] == [True, False]
+
+
+def test_detect_split_sentences_handles_empty_and_single_line_input():
+    assert detect_split_sentences([]) == []
+    assert detect_split_sentences([SourcedLine("a.webm", 0.0, 1.0, "hi", None)]) == [False]

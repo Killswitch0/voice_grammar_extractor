@@ -115,6 +115,14 @@ of your English improving (or not) over time.
   retuned without re-running the model.
 - **Nothing is sent to any AI automatically** — extraction only *prepares*
   the text. What happens with it next is a separate, deliberate step.
+- **A cut between files is not a full stop** — a long session is recorded in
+  parts and the recorder cuts on a timer, so one sentence routinely ends up
+  split across two files. The half that survives on its own looks like a
+  mistake nobody made ("understand that I'm struggling" has no subject until
+  you see the previous file's last line). Both halves get flagged rather than
+  joined: whether two files really are consecutive parts of one recording is
+  something only the owner knows, and stitching unrelated recordings together
+  would invent a sentence that was never spoken.
 - **Whisper doesn't grade grammar** — it predicts the most likely words for
   a sound. That means in ambiguous, mumbled spots it can occasionally "smooth
   over" a subtle grammar slip. The `[?]` marker flags exactly those lines.

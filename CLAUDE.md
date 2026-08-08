@@ -65,27 +65,42 @@ their rules together in one response.
    said, and every count below (occurrences, "most repeated mistake") is
    drawn from that fraction, so it isn't comparable with other sessions.
    Recommend re-recording rather than reading a trend into it.
-2. Ignore accidental one-off slips unless they repeat across sessions.
-3. Focus on recurring patterns over isolated mistakes.
-4. Prioritize mistakes that actually affect communication over tiny stylistic details.
-5. Be concise. Spend effort where the owner will learn the most, not on finding every mistake.
-6. Never praise unless there is measurable improvement vs. previous sessions in `analysis/memory.md`.
-7. If a category has no meaningful mistakes this session, explicitly say so — don't pad it.
-8. When unsure whether something is a genuine mistake or transcription noise, ignore it.
-9. Optimize every recommendation for spoken English, not written/formal English.
-10. Teach like an experienced tutor, not like a grammar textbook.
-11. Only quote mistakes you can point to verbatim in the transcript. Never invent an example.
-12. Reuse existing mistake-category names from `analysis/memory.md` — don't
+2. **A line with `"continues_previous": true` was cut by the recorder, not by
+   the speaker.** A long session is recorded in parts, and the cut lands on a
+   timer rather than on a full stop — so the tail of one file and the head of
+   the next are one sentence torn in half. The surviving half looks exactly
+   like a mistake that was never made: "So, and I just..." continuing into
+   "understand that I'm a little bit struggling" reads as a missing subject.
+   This happened at 8 of 54 file boundaries in the first three sessions.
+
+   Read such a pair as **one utterance** (the flagged line together with the
+   one carrying `"continued_in_next": true`), and never report a sentence
+   fragment, missing subject, missing auxiliary or missing article against
+   either half on its own. If the joined sentence contains a real mistake,
+   report it once, quoting both halves. In `transcript_annotated.txt` the same
+   lines carry a `[>]` marker.
+
+3. Ignore accidental one-off slips unless they repeat across sessions.
+4. Focus on recurring patterns over isolated mistakes.
+5. Prioritize mistakes that actually affect communication over tiny stylistic details.
+6. Be concise. Spend effort where the owner will learn the most, not on finding every mistake.
+7. Never praise unless there is measurable improvement vs. previous sessions in `analysis/memory.md`.
+8. If a category has no meaningful mistakes this session, explicitly say so — don't pad it.
+9. When unsure whether something is a genuine mistake or transcription noise, ignore it.
+10. Optimize every recommendation for spoken English, not written/formal English.
+11. Teach like an experienced tutor, not like a grammar textbook.
+12. Only quote mistakes you can point to verbatim in the transcript. Never invent an example.
+13. Reuse existing mistake-category names from `analysis/memory.md` — don't
     rename "article errors" to "determiner issues" just because it reads
     better this session. Consistent naming is what makes trend tracking real.
-13. **Keep scores stable unless you have a concrete reason to move them.**
+14. **Keep scores stable unless you have a concrete reason to move them.**
     CEFR estimate and the four 0-10 scores (grammar/vocabulary/naturalness/
     fluency) should default to the same value as the previous session in
     `analysis/memory.md`. Only change one if you can point to specific new
     evidence in this session's transcript — otherwise a score drifting up or
     down session to session with no real change is noise, not signal, and
     undermines the whole point of tracking it over time.
-14. **Rank mistakes by impact, not raw frequency.** Wherever mistakes get
+15. **Rank mistakes by impact, not raw frequency.** Wherever mistakes get
     ranked for attention — `Current Priorities` in `memory.md` (step 6) and
     focus selection in Conversation Practice Mode (P15) — use
     `impact = severity × occurrences`, not occurrence count alone. A
@@ -93,7 +108,7 @@ their rules together in one response.
     not automatically outrank a lower-frequency error that actually breaks
     communication (e.g. wrong verb agreement) — severity is the multiplier
     that keeps priority weighted toward what hurts intelligibility, per
-    rule 4. When comparing across sessions, weight recent sessions' occurrences
+    rule 5. When comparing across sessions, weight recent sessions' occurrences
     more than older ones so a mistake that's fading doesn't keep outranking
     one that's actively getting worse.
 
@@ -248,7 +263,7 @@ session: 3 fill-in-the-blank, 3 sentence-correction, 3 translation, 3
 rewrite exercises. Do not introduce unrelated grammar.
 
 **Session summary** — CEFR estimate; biggest strengths; biggest weaknesses;
-grammar/vocabulary/naturalness/fluency scores (0-10, per rule 13 above);
+grammar/vocabulary/naturalness/fluency scores (0-10, per rule 14 above);
 most repeated mistake; any regressions this session (call these out by name,
 don't bury them); most important vocabulary to learn; three concrete goals
 before the next recording.
@@ -289,7 +304,7 @@ adding/updating/moving entries):
 - Append one row to "Conversation History."
 - Update "Current Priorities" and "Focus For Next Recording" based on this
   session's action plan — rank "Current Priorities" by impact (severity ×
-  occurrences, rule 14), not by raw occurrence count alone.
+  occurrences, rule 15), not by raw occurrence count alone.
 
 ## 7. Append to `analysis/scores_history.csv`
 
@@ -325,7 +340,7 @@ Always teach through dialogue, not lists of exercises.
 ## Rules
 
 Numbered `P1`–`P18` on purpose, so they never collide with "General rules"
-`1`–`13` above when both are visible in the same file — the two rule sets
+`1`–`15` above when both are visible in the same file — the two rule sets
 are never mixed (see "Modes in this repo"), but the numbers must stay
 unambiguous even in a long context.
 
@@ -407,7 +422,7 @@ P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
 P15. Pick ONE focus grammar pattern for the session:
      - If `Persistent Grammar Mistakes` has no entries yet (common in the
        first few sessions — a mistake only becomes "persistent" after
-       recurring, see General rule 2), skip grammar-pattern selection
+       recurring, see General rule 3), skip grammar-pattern selection
        entirely and fall back to normal topic selection (P10) — same as
        the missing-file case in P14.
      - Otherwise: `Current Priorities` and `Focus For Next Recording` are
@@ -423,7 +438,7 @@ P15. Pick ONE focus grammar pattern for the session:
        one — drill unlogged patterns before re-checking scheduled ones.
      - If several candidates are equally due (tied `Next due` dates, or
        several with no row yet), break the tie by impact — severity ×
-       occurrences, rule 14 — not plain severity or raw frequency alone.
+       occurrences, rule 15 — not plain severity or raw frequency alone.
      - Always track and log the pattern under its exact `## <Mistake
        Name>` heading from `memory.md` — never the free-text priority
        wording — so `conversation_focus_log.md` stays keyed consistently
