@@ -5,7 +5,7 @@
 # If you need to bump a version, bump torch and torchaudio together and
 # re-verify diarization + transcription both still work before relying on it.
 faster-whisper==1.2.1
-pyannote.audio==4.0.7
+pyannote.audio==4.0.7  # pulls in lightning>=2.4 — see the PYSEC-2026-3624 note in .github/workflows/tests.yml before bumping
 omegaconf==2.3.1  # not imported directly — needed to unpickle pyannote/embedding's checkpoint (OmegaConf DictConfig), otherwise: ModuleNotFoundError: No module named 'omegaconf'
 torch==2.13.0
 torchaudio==2.11.0

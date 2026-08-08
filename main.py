@@ -36,19 +36,58 @@ from rich.table import Table
 sys.path.insert(0, str(Path(__file__).parent))
 
 from voxlib.console import configure_logging, console, print_error  # noqa: E402
+from voxlib import validation  # noqa: E402
+from voxlib.diarization import DEFAULT_MERGE_GAP_SEC  # noqa: E402
 
 
-def _threshold_type(value: str) -> float:
-    """argparse type= for --threshold: it's a cosine similarity (see
-    DiarizationEngine.cosine_similarity), which is mathematically bounded to
-    [-1.0, 1.0] — anything outside that range can only be a typo (e.g. "8.0"
-    meant as "0.8") and would otherwise silently misidentify every speaker."""
-    parsed = float(value)
-    if not (-1.0 <= parsed <= 1.0):
-        raise argparse.ArgumentTypeError(
-            f"must be between -1.0 and 1.0 (cosine similarity), got {parsed}"
-        )
-    return parsed
+def _fluency_log_path() -> Path | None:
+    """
+    Where to append this run's fluency measurement, or None to skip it.
+
+    `analysis/` is this project's coaching workspace (memory.md, session
+    reports, score history) and is absent for anyone using the extractor on its
+    own — so the history file is only kept when that folder already exists,
+    rather than conjuring a directory nobody asked for. Resolved against the
+    script's own location, not the current directory, so it lands in the same
+    place whether you run `python main.py` from the project root or `./run.sh`
+    from anywhere.
+    """
+    candidate = Path(__file__).parent / "analysis"
+    return candidate / "fluency_history.csv" if candidate.is_dir() else None
+
+
+def _processed_log_path(output_dir: Path) -> Path:
+    """
+    Where to keep the record of which recordings have already been transcribed.
+
+    Prefers `analysis/`, this project's coaching workspace: that folder is what
+    gets backed up, and the log exists to protect the running mistake counts
+    that live there. Falls back to the output folder for anyone using the
+    extractor on its own, so the protection isn't conditional on a workspace
+    they don't have.
+    """
+    workspace = Path(__file__).parent / "analysis"
+    return (workspace if workspace.is_dir() else output_dir) / "processed.json"
+
+
+def _checked(validator, name: str):
+    """
+    Turns one of voxlib.validation's checks into an argparse `type=`.
+
+    The checks live there, not here, because a `--config` file reaches the same
+    settings without passing through argparse at all — one definition is what
+    keeps the two entry points from disagreeing. This only adapts the error
+    type, so argparse prints the message instead of swallowing it behind its
+    own generic "invalid value".
+    """
+    def parse(raw: str):
+        try:
+            return validator(raw, name)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from exc
+
+    parse.__name__ = name.lstrip("-").replace("-", "_")
+    return parse
 
 
 def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentParser:
@@ -115,7 +154,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--threshold",
-        type=_threshold_type,
+        type=_checked(validation.cosine_threshold, "--threshold"),
         default=config_defaults.get("threshold"),
         help="Cosine similarity threshold for recognizing your voice. If not given, it's "
              "auto-calibrated per recording from the gap between speakers' similarity to "
@@ -129,6 +168,23 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
         help="Disable speaker separation: the whole file is treated as your solo speech.",
     )
     parser.add_argument(
+        "--merge-gap",
+        type=_checked(validation.non_negative_float, "--merge-gap"),
+        default=config_defaults.get("merge_gap", DEFAULT_MERGE_GAP_SEC),
+        help=f"Stitch consecutive turns by the same speaker back together when less than this "
+             f"many seconds apart (default: {DEFAULT_MERGE_GAP_SEC}). Diarization cuts at every "
+             f"pause, including mid-sentence ones, and whisper recognizes a whole phrase far "
+             f"better than the fragments. Use 0 to keep the raw segments.",
+    )
+    parser.add_argument(
+        "--only-new",
+        action="store_true",
+        help="Skip recordings that have already been transcribed in an earlier run "
+             "(matched by file content, not name). Without this, they're processed again "
+             "and only a warning is printed — re-running a session on purpose is a normal "
+             "thing to do.",
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Don't use the progress cache — recompute everything from scratch, "
@@ -136,7 +192,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--split-chars",
-        type=int,
+        type=_checked(validation.positive_int, "--split-chars"),
         default=config_defaults.get("split_chars"),
         help="If set, additionally splits transcript_clean.txt into parts no "
              "longer than the given number of characters (output/parts/part_N.txt) — "
@@ -144,7 +200,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--low-confidence-threshold",
-        type=float,
+        type=_checked(validation.logprob_threshold, "--low-confidence-threshold"),
         default=config_defaults.get("low_confidence_threshold", -0.5),
         help="avg_logprob threshold (usually between 0 and -1.5) below which a line "
              "in the annotated document is marked as low-confidence [?] (default: -0.5).",
@@ -166,7 +222,7 @@ def build_arg_parser(config_defaults: dict | None = None) -> argparse.ArgumentPa
     )
     parser.add_argument(
         "--batch-size",
-        type=int,
+        type=_checked(validation.positive_int, "--batch-size"),
         default=config_defaults.get("batch_size"),
         help="Enable batched transcription (BatchedInferencePipeline) with the given "
              "batch size — speeds up processing of long lines, especially on GPU. "
@@ -193,15 +249,29 @@ def _print_dry_run_result(result: dict) -> None:
 
     table = Table(show_edge=True)
     table.add_column("File")
-    table.add_column("Speakers", justify="right")
+    # Merged rather than given a column of its own: a separate column pushed
+    # the table past a standard terminal width and started truncating file
+    # names, which are the one thing you need to read to act on this.
+    table.add_column("Speakers (you)", justify="right")
     table.add_column("Your lines", justify="right")
     table.add_column("Your speech", justify="right")
     table.add_column("Share", justify="right")
+
+    ambiguous = False
     for s in result["per_file"]:
         mins_mine = s["duration_mine_sec"] / 60
+        # The whole point of the document is that it holds one person's speech.
+        # 0 speakers matched means an empty transcript; 2+ means someone else's
+        # sentences mixed into yours. Both are worth colouring, because both
+        # are cheap to fix here and expensive to notice later.
+        matched = s["num_speakers_mine"]
+        speakers_cell = f"{s['num_speakers']} ({matched})"
+        if matched != 1:
+            ambiguous = True
+            speakers_cell = f"[bold red]{speakers_cell}[/]"
         table.add_row(
             escape(s["file"]),
-            str(s["num_speakers"]),
+            speakers_cell,
             f"{s['num_segments_mine']}/{s['num_segments_total']}",
             f"~{mins_mine:.1f} min",
             f"[bold]{s['mine_share_pct']:.0f}%[/]",
@@ -209,6 +279,14 @@ def _print_dry_run_result(result: dict) -> None:
     console.print(table)
 
     console.print()
+    if ambiguous:
+        console.print(
+            "[bold red]Check the bracketed number in 'Speakers (you)' above[/] — that's how many "
+            "speakers were matched as you, and anything other than 1 means the split is wrong: "
+            "0 would give you an empty transcript, 2+ mixes another person's speech into yours. "
+            "Adjust [bold]--threshold[/] before running the full processing."
+        )
+        console.print()
     console.print("If the numbers look off — adjust [bold]--threshold[/] and try [bold]--dry-run[/] again.")
     console.print("Once you're happy with it — drop --dry-run and run the full processing.")
 
@@ -218,7 +296,9 @@ def _print_full_result(result: dict) -> None:
     console.print("[bold green]Done![/]")
     console.print(f"  Annotated document: [cyan]{escape(str(result['annotated']))}[/]")
     console.print(f"  Clean text for AI:  [cyan]{escape(str(result['clean']))}[/]")
-    if "parts" in result:
+    if result.get("lines_json"):
+        console.print(f"  Lines + confidence: [cyan]{escape(str(result['lines_json']))}[/]")
+    if result.get("parts"):
         console.print(f"  Parts for AI ({len(result['parts'])}): [cyan]{escape(str(result['parts'][0].parent))}/[/]")
     stats = result.get("stats", {})
     if stats:
@@ -227,6 +307,15 @@ def _print_full_result(result: dict) -> None:
             f"  Stats: {stats['total_lines']} lines, ~{mins:.1f} min of speech, "
             f"~{stats['total_words']} words"
         )
+    if result.get("fluency") is not None:
+        from voxlib.fluency import describe
+        console.print(f"  Fluency: {escape(describe(result['fluency']))}")
+    if result.get("already_processed"):
+        console.print()
+        console.print(f"[bold yellow]Already transcribed:[/] {escape(result['already_processed'])}")
+    if result.get("low_confidence_warning"):
+        console.print()
+        console.print(f"[bold yellow]Recording quality:[/] {escape(result['low_confidence_warning'])}")
 
 
 def _print_failed_files(failed_files: list[dict]) -> None:
@@ -279,6 +368,10 @@ def main() -> int:
             dry_run=args.dry_run,
             remove_fillers=args.remove_fillers,
             batch_size=args.batch_size,
+            fluency_log=_fluency_log_path(),
+            merge_gap=args.merge_gap,
+            processed_log_path=_processed_log_path(args.output_dir),
+            only_new=args.only_new,
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/]")

@@ -1,0 +1,217 @@
+name: Deep checks
+
+# The checks that are too slow or too network-dependent to run on every push,
+# but that cover the things most likely to break silently: the pinned
+# dependency set, the pinned model revisions, and the accepted CVE.
+#
+# tests.yml stays fast and runs on everything; this runs weekly, on demand,
+# and whenever the pins themselves change.
+on:
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays, off the hour — GitHub's schedulers queue hard on :00
+  workflow_dispatch:
+  push:
+    paths:
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "voxlib/diarization.py"  # holds the pinned model revisions
+      - ".github/workflows/deep-checks.yml"
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "pyproject.toml"
+      - "Dockerfile"
+      - "voxlib/diarization.py"
+      - ".github/workflows/deep-checks.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The only job that installs the real torch/pyannote/faster-whisper stack.
+  # requirements.txt documents a real incident where a mismatched
+  # torch/torchaudio pair broke diarization at runtime — and Dependabot
+  # proposes exactly those bumps every week. Without this, such a PR arrives
+  # green, because the fast job never installs them at all.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install the pinned dependency set
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      # The documented failure surfaced as an AttributeError on first use, not
+      # at install time, so resolving the versions proves nothing on its own.
+      - name: Import the stack
+        run: |
+          python - <<'PY'
+          import faster_whisper, pyannote.audio, torch, torchaudio
+          print("torch", torch.__version__, "| torchaudio", torchaudio.__version__)
+          print("pyannote.audio", pyannote.audio.__version__)
+          # The exact call that broke last time the pair was mismatched.
+          from pyannote.audio import Model, Pipeline  # noqa: F401
+          print("imports OK")
+          PY
+
+      - name: Run the slow end-to-end test
+        run: pytest -m slow -v
+
+  # The two pyannote models are loaded at fixed commits (see
+  # voxlib/diarization.py). If a pin stops resolving — repo moved, history
+  # rewritten — the app breaks at runtime on the user's machine, with nothing
+  # in CI having noticed. Metadata is public even though the models are gated,
+  # so this needs no HuggingFace token.
+  model-revisions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Check the pinned model revisions still resolve
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          import sys
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          # Read the constants without importing voxlib.diarization, which
+          # would drag in numpy and (on first use) torch.
+          source = Path("voxlib/diarization.py").read_text(encoding="utf-8")
+          tree = ast.parse(source)
+          constants = {
+              node.targets[0].id: node.value.value
+              for node in tree.body
+              if isinstance(node, ast.Assign)
+              and isinstance(node.targets[0], ast.Name)
+              and isinstance(node.value, ast.Constant)
+          }
+
+          pins = [
+              (constants["DIARIZATION_MODEL"], constants["DIARIZATION_REVISION"]),
+              (constants["EMBEDDING_MODEL"], constants["EMBEDDING_REVISION"]),
+          ]
+
+          failed = False
+          for repo, revision in pins:
+              url = f"https://huggingface.co/api/models/{repo}/revision/{revision}"
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as response:
+                      reported = json.load(response).get("sha")
+              except urllib.error.HTTPError as exc:
+                  print(f"FAIL {repo}@{revision[:8]} -> HTTP {exc.code}")
+                  failed = True
+                  continue
+              if reported != revision:
+                  print(f"FAIL {repo}@{revision[:8]} -> resolved to {reported}")
+                  failed = True
+              else:
+                  print(f"ok   {repo}@{revision[:8]}")
+
+          sys.exit(1 if failed else 0)
+          PY
+
+  # tests.yml suppresses PYSEC-2026-3624 with a written justification, because
+  # no fixed release of lightning exists. This job watches that decision.
+  #
+  # It deliberately does NOT just re-run the audit unfiltered and fail: that
+  # would be red every single week, and a permanently red check teaches you to
+  # ignore red — the same way a permanent suppression teaches you to forget it.
+  # Instead it asserts the finding set is EXACTLY what was accepted, so it is
+  # green while nothing has changed and fails on any movement in either
+  # direction: something new appeared, or the accepted one stopped being
+  # reported because a fix finally shipped.
+  audit-accepted-set:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Audit and compare against the accepted set
+        run: |
+          # pip-audit exits 1 whenever it finds anything, which is the normal
+          # case here — the comparison below is what decides pass or fail.
+          pipx run pip-audit -r requirements.txt --format=json --output audit.json || true
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          # Accepted on 2026-08-08: RCE in lightning's _load_state, reachable
+          # only through a malicious checkpoint. This project loads two, both
+          # from official pinned pyannote repos. No fixed release exists — the
+          # fix is unreleased commit d710d68. See tests.yml for the full
+          # reasoning.
+          ACCEPTED = {"PYSEC-2026-3624"}
+
+          report = Path("audit.json")
+          if not report.exists():
+              sys.exit("pip-audit produced no report — it failed for some other reason.")
+
+          # pip-audit has emitted both shapes across versions: a bare array of
+          # dependencies, and an object wrapping it under "dependencies".
+          # Accept either, so a pip-audit upgrade can't turn this check into a
+          # confusing "the accepted finding disappeared" failure.
+          data = json.loads(report.read_text(encoding="utf-8"))
+          dependencies = data["dependencies"] if isinstance(data, dict) else data
+
+          found = {}
+          for dependency in dependencies:
+              for vuln in dependency.get("vulns", []):
+                  found[vuln["id"]] = (
+                      f"{dependency['name']} {dependency['version']} "
+                      f"(fix: {', '.join(vuln.get('fix_versions') or ['none published'])})"
+                  )
+
+          for vuln_id, where in sorted(found.items()):
+              print(f"  {vuln_id}: {where}")
+
+          appeared = set(found) - ACCEPTED
+          gone = ACCEPTED - set(found)
+
+          if appeared:
+              print("\nNEW vulnerabilities, not covered by any accepted decision:")
+              for vuln_id in sorted(appeared):
+                  print(f"  {vuln_id}: {found[vuln_id]}")
+              print("Assess each one. If it is accepted too, add it to ACCEPTED here")
+              print("and to --ignore-vuln in tests.yml, with the reasoning written down.")
+
+          if gone:
+              print("\nNo longer reported, so the suppression is now obsolete:")
+              for vuln_id in sorted(gone):
+                  print(f"  {vuln_id}")
+              print("Drop it from --ignore-vuln in tests.yml and from ACCEPTED here,")
+              print("and re-pin the dependency that fixed it.")
+
+          if appeared or gone:
+              sys.exit(1)
+
+          print("\nUnchanged: only the accepted finding(s) are present.")
+          PY

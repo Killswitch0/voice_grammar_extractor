@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from voxlib.diarization import DiarizationEngine, IdentifiedSegment, Segment
@@ -27,7 +28,9 @@ class FakeDiarizer:
         for seg in segments:
             sim = self._similarity_by_speaker[seg.speaker_label]
             result.append(IdentifiedSegment(start=seg.start, end=seg.end, is_me=sim >= effective_threshold, similarity=sim))
-        return result
+        # Mirrors the real signature: the threshold comes back out, because
+        # under auto-calibration only this call knows what it ended up being.
+        return result, effective_threshold
 
 
 def _make_input_and_wav(tmp_path: Path):
@@ -46,19 +49,19 @@ def test_threshold_change_updates_is_me_without_recomputing_identification(tmp_p
     segments = [Segment(start=0.0, end=1.0, speaker_label="SPEAKER_00")]
     diarizer = FakeDiarizer(segments, {"SPEAKER_00": 0.70})
 
-    _, identified, _ = _diarize_and_identify(
+    identified = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.75,
         reference_fingerprint=ref_fp,
-    )
+    ).identified
     assert identified[0].is_me is False
     assert diarizer.identify_calls == 1
 
     # Lower threshold on the SAME file/reference -> is_me flips to True,
     # without calling identify_my_segments again (similarity is reused from cache).
-    _, identified2, _ = _diarize_and_identify(
+    identified2 = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.6,
         reference_fingerprint=ref_fp,
-    )
+    ).identified
     assert identified2[0].is_me is True
     assert diarizer.identify_calls == 1
 
@@ -76,20 +79,20 @@ def test_cache_hit_auto_calibrates_when_threshold_not_given(tmp_path):
     diarizer = FakeDiarizer(segments, similarity)
 
     # First run (cache miss) with an explicit threshold to populate the cache.
-    _, identified, _ = _diarize_and_identify(
+    identified = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.75,
         reference_fingerprint=ref_fp,
-    )
+    ).identified
     assert identified[0].is_me is False  # 0.7275 < 0.75, matches the real-world bug report
     assert diarizer.identify_calls == 1
 
     # Re-run with no --threshold at all (None) -> served from cache, but the
     # cache-hit branch must reconstruct per-speaker similarity and auto-calibrate,
     # rather than blindly comparing against a raw threshold=None.
-    _, identified2, _ = _diarize_and_identify(
+    identified2 = _diarize_and_identify(
         input_file, wav_path, cache_dir, True, diarizer, object(), threshold=None,
         reference_fingerprint=ref_fp,
-    )
+    ).identified
     assert identified2[0].is_me is True  # auto-calibrated threshold (~0.41) now catches it
     assert identified2[1].is_me is False
     assert diarizer.identify_calls == 1  # still served from cache, no recomputation
@@ -171,3 +174,84 @@ def test_no_cache_does_not_write_to_disk(tmp_path):
     )
 
     assert not cache_dir.exists()
+
+
+def _fragmented(tmp_path):
+    """Six near-continuous fragments of one speaker — what diarization does to
+    a single spoken sentence with small pauses in it."""
+    input_file, wav_path = _make_input_and_wav(tmp_path)
+    segments = [Segment(start=i * 1.0, end=i * 1.0 + 0.7, speaker_label="SPEAKER_00") for i in range(6)]
+    return input_file, wav_path, FakeDiarizer(segments, {"SPEAKER_00": 0.9})
+
+
+def test_pipeline_hands_merged_segments_to_identification(tmp_path):
+    input_file, wav_path, diarizer = _fragmented(tmp_path)
+
+    result = _diarize_and_identify(
+        input_file, wav_path, tmp_path / ".cache", True, diarizer, object(), threshold=0.5,
+        reference_fingerprint={"size": 1, "mtime": 1.0}, merge_gap=0.8,
+    )
+
+    assert len(result.raw_segments) == 6
+    assert len(result.segments) == 1
+    assert (result.segments[0].start, result.segments[0].end) == (0.0, 5.7)
+    # Identification — and therefore transcription — sees the merged form.
+    assert len(result.identified) == 1
+
+
+def test_cache_stores_raw_segments_not_merged_ones(tmp_path):
+    """
+    If the merged form were cached, merging would be irreversible: the next run
+    would merge the already-merged segments and the original boundaries could
+    never be recovered without re-running the model.
+    """
+    cache_dir = tmp_path / ".cache"
+    input_file, wav_path, diarizer = _fragmented(tmp_path)
+
+    _diarize_and_identify(
+        input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.5,
+        reference_fingerprint={"size": 1, "mtime": 1.0}, merge_gap=0.8,
+    )
+
+    stored = json.loads(next(iter(cache_dir.glob("*.json"))).read_text(encoding="utf-8"))
+    assert len(stored["diarization"]) == 6
+    assert stored["segmentation_params"] == {"merge_gap": 0.8}
+
+
+def test_changing_the_merge_gap_reuses_diarization_but_redoes_identification(tmp_path):
+    cache_dir = tmp_path / ".cache"
+    input_file, wav_path, diarizer = _fragmented(tmp_path)
+    ref_fp = {"size": 1, "mtime": 1.0}
+
+    first = _diarize_and_identify(
+        input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.5,
+        reference_fingerprint=ref_fp, merge_gap=0.8,
+    )
+    assert len(first.segments) == 1
+
+    # A smaller gap no longer joins the 0.3s pauses, so the segments are
+    # different and everything keyed to their boundaries has to be redone —
+    # but pyannote must not run again.
+    second = _diarize_and_identify(
+        input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.5,
+        reference_fingerprint=ref_fp, merge_gap=0.1,
+    )
+
+    assert len(second.segments) == 6
+    assert diarizer.diarize_calls == 1
+    assert diarizer.identify_calls == 2
+
+
+def test_an_unchanged_merge_gap_keeps_the_whole_cache(tmp_path):
+    cache_dir = tmp_path / ".cache"
+    input_file, wav_path, diarizer = _fragmented(tmp_path)
+    ref_fp = {"size": 1, "mtime": 1.0}
+
+    for _ in range(2):
+        _diarize_and_identify(
+            input_file, wav_path, cache_dir, True, diarizer, object(), threshold=0.5,
+            reference_fingerprint=ref_fp, merge_gap=0.8,
+        )
+
+    assert diarizer.diarize_calls == 1
+    assert diarizer.identify_calls == 1

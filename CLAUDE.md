@@ -45,32 +45,62 @@ their rules together in one response.
 # General rules
 
 1. Ignore likely speech-to-text transcription errors, not genuine mistakes.
-   **Any line marked `[?]` in `transcript_annotated.txt` is a low-confidence
-   Whisper recognition** (see `HOW_IT_WORKS.md`) — exclude those lines from
-   grammar judgment entirely rather than guessing whether the "mistake" is
-   real or a mis-transcription. Cross-check `transcript_annotated.txt` for
-   this before finalizing your mistake list from `transcript_clean.txt`.
-2. Ignore accidental one-off slips unless they repeat across sessions.
-3. Focus on recurring patterns over isolated mistakes.
-4. Prioritize mistakes that actually affect communication over tiny stylistic details.
-5. Be concise. Spend effort where the owner will learn the most, not on finding every mistake.
-6. Never praise unless there is measurable improvement vs. previous sessions in `analysis/memory.md`.
-7. If a category has no meaningful mistakes this session, explicitly say so — don't pad it.
-8. When unsure whether something is a genuine mistake or transcription noise, ignore it.
-9. Optimize every recommendation for spoken English, not written/formal English.
-10. Teach like an experienced tutor, not like a grammar textbook.
-11. Only quote mistakes you can point to verbatim in the transcript. Never invent an example.
-12. Reuse existing mistake-category names from `analysis/memory.md` — don't
+   **Read `analysis/sessions/YYYY-MM-DD.lines.json` and skip every line with
+   `"low_confidence": true`** — whisper wasn't sure it heard those correctly
+   (see `HOW_IT_WORKS.md`), so a "mistake" in one may never have been
+   spoken. Exclude them from grammar judgment entirely rather than guessing.
+   Quote from `text` in that file; it is the same text as
+   `transcript_clean.txt`, with the confidence flag attached to each line
+   instead of living in a separate document you have to align by hand.
+   The archived `.annotated.txt` (with `[?]` markers) is still there for when
+   you want to read a stretch of the session with your eyes.
+
+   Sessions archived before this file existed only have the two `.txt` files —
+   there, fall back to reading the `[?]` markers out of the `.annotated.txt`
+   directly, and note in the report that you did.
+
+   `totals.low_confidence_lines` / `totals.lines` in that file is how much of
+   the session you had to throw away. **If it's 40% or more, say so plainly
+   at the top of the report** — you are reviewing a fraction of what was
+   said, and every count below (occurrences, "most repeated mistake") is
+   drawn from that fraction, so it isn't comparable with other sessions.
+   Recommend re-recording rather than reading a trend into it.
+2. **A line with `"continues_previous": true` was cut by the recorder, not by
+   the speaker.** A long session is recorded in parts, and the cut lands on a
+   timer rather than on a full stop — so the tail of one file and the head of
+   the next are one sentence torn in half. The surviving half looks exactly
+   like a mistake that was never made: "So, and I just..." continuing into
+   "understand that I'm a little bit struggling" reads as a missing subject.
+   This happened at 8 of 54 file boundaries in the first three sessions.
+
+   Read such a pair as **one utterance** (the flagged line together with the
+   one carrying `"continued_in_next": true`), and never report a sentence
+   fragment, missing subject, missing auxiliary or missing article against
+   either half on its own. If the joined sentence contains a real mistake,
+   report it once, quoting both halves. In `transcript_annotated.txt` the same
+   lines carry a `[>]` marker.
+
+3. Ignore accidental one-off slips unless they repeat across sessions.
+4. Focus on recurring patterns over isolated mistakes.
+5. Prioritize mistakes that actually affect communication over tiny stylistic details.
+6. Be concise. Spend effort where the owner will learn the most, not on finding every mistake.
+7. Never praise unless there is measurable improvement vs. previous sessions in `analysis/memory.md`.
+8. If a category has no meaningful mistakes this session, explicitly say so — don't pad it.
+9. When unsure whether something is a genuine mistake or transcription noise, ignore it.
+10. Optimize every recommendation for spoken English, not written/formal English.
+11. Teach like an experienced tutor, not like a grammar textbook.
+12. Only quote mistakes you can point to verbatim in the transcript. Never invent an example.
+13. Reuse existing mistake-category names from `analysis/memory.md` — don't
     rename "article errors" to "determiner issues" just because it reads
     better this session. Consistent naming is what makes trend tracking real.
-13. **Keep scores stable unless you have a concrete reason to move them.**
+14. **Keep scores stable unless you have a concrete reason to move them.**
     CEFR estimate and the four 0-10 scores (grammar/vocabulary/naturalness/
     fluency) should default to the same value as the previous session in
     `analysis/memory.md`. Only change one if you can point to specific new
     evidence in this session's transcript — otherwise a score drifting up or
     down session to session with no real change is noise, not signal, and
     undermines the whole point of tracking it over time.
-14. **Rank mistakes by impact, not raw frequency.** Wherever mistakes get
+15. **Rank mistakes by impact, not raw frequency.** Wherever mistakes get
     ranked for attention — `Current Priorities` in `memory.md` (step 6) and
     focus selection in Conversation Practice Mode (P15) — use
     `impact = severity × occurrences`, not occurrence count alone. A
@@ -78,7 +108,7 @@ their rules together in one response.
     not automatically outrank a lower-frequency error that actually breaks
     communication (e.g. wrong verb agreement) — severity is the multiplier
     that keeps priority weighted toward what hurts intelligibility, per
-    rule 4. When comparing across sessions, weight recent sessions' occurrences
+    rule 5. When comparing across sessions, weight recent sessions' occurrences
     more than older ones so a mistake that's fading doesn't keep outranking
     one that's actively getting worse.
 
@@ -103,17 +133,29 @@ slow transcription on an unverified split):
 ```
 If there's no saved reference sample yet, run `./identify.sh recordings/<filename>` first.
 
-Either way, this overwrites `output/transcript_clean.txt` and
-`output/transcript_annotated.txt`. If already processed, skip to step 2.
+If the run warns that some recordings were **already transcribed before**,
+stop and check with the owner before continuing: unless they're deliberately
+re-running a session, old speech is about to be merged into this session's
+transcript, and the occurrence counters in `memory.md` would count it twice.
+`--only-new` processes just the new files.
+
+Either way, this overwrites `output/transcript_clean.txt`,
+`output/transcript_annotated.txt`, `output/lines.json` and
+`output/fluency.json`. If already processed, skip to step 2.
 
 ## 2. Archive today's transcript
 
-`output/transcript_clean.txt` gets overwritten on every run, so before
-analyzing, copy both output files into dated session files:
+Everything in `output/` gets overwritten on every run, so before analyzing,
+copy this session's files into dated ones:
 ```bash
 cp output/transcript_clean.txt analysis/sessions/YYYY-MM-DD.txt
 cp output/transcript_annotated.txt analysis/sessions/YYYY-MM-DD.annotated.txt
+cp output/lines.json analysis/sessions/YYYY-MM-DD.lines.json
 ```
+The `.lines.json` copy is the one you actually analyze from (see rule 1): it
+carries each line's confidence flag, source file and timing together, so
+nothing has to be cross-referenced by hand. Archiving it also means a past
+session can be re-measured later without re-running whisper.
 Use today's actual date. If a session already exists for today, ask the
 owner whether to append or replace — never silently overwrite past analysis.
 
@@ -146,15 +188,51 @@ automatic").
 Filler-word frequency ("um", "uh", "erm") is a fluency signal, not a grammar
 mistake — track it separately, don't fold it into the mistake categories above.
 
-Count filler words in `analysis/sessions/YYYY-MM-DD.txt` and express as
-**fillers per 100 words** (`filler_count / total_word_count * 100`). Compare
-against the last few entries in `analysis/scores_history.csv` for the trend.
+**Don't count these by hand.** The pipeline measures them and writes
+`output/fluency.json` for the run, appending the same numbers to
+`analysis/fluency_history.csv` (see `voxlib/fluency.py`). Read the row for
+this session from there:
 
-**If this recording was processed with `--remove-fillers`,** the fillers are
-already stripped from the transcript before you ever see it — skip this
-measurement for this session and note in the session report that fluency
-tracking wasn't possible for this recording (don't report a rate of 0 as if
-it were real).
+- `low_confidence_share` — **read this first.** The fraction of lines
+  whisper wasn't sure about (the `[?]` ones). It measures the recording, not
+  the speaker. Every word-based number below is computed over the remaining
+  reliable lines only, so when this moves, the others change meaning.
+- `fillers_per_100_words` — hesitation sounds per 100 **reliable** words.
+  "uh-huh" and "mm-hmm" are backchannel agreement, not hesitation, and are
+  deliberately excluded. Treat the number as a **lower bound**: whisper drops
+  many hesitations before they ever reach the transcript.
+- `words_per_minute` — speaking rate across your own reliable speech.
+  Comparable between solo and diarized recordings.
+- `median_pause_sec` / `long_pauses` — **solo recordings only.** Blank for
+  diarized ones, because there the gap between two of your lines is mostly
+  the other person's turn. (These use every line, not just reliable ones — a
+  timestamp is valid even when the words on it weren't recognized.)
+
+Compare against the previous rows in `analysis/fluency_history.csv` for the
+trend. An empty cell means "not measured", never zero — if a metric is blank,
+say it wasn't measurable this session rather than reporting 0.
+
+**If `low_confidence_share` is 0.4 or higher, or has moved sharply since the
+last sessions, say so explicitly in the session report and do NOT read a
+fluency trend out of it.** At that level most of the transcript is excluded
+from grammar judgment too, so the session is a smaller and different sample
+than the ones before it — a drop in any score would be describing the
+microphone. Recommend re-recording (mic distance, background noise) instead
+of drawing conclusions. This has already happened once: on 2026-08-06 the
+share hit 60% against 24-30% before, 17 of the 20 counted "fillers" sat
+inside `[?]` lines, and the resulting "10x jump in hesitation" was an
+artifact — the reliable-line series for those three sessions is
+0.05 / 0.00 / 0.12, essentially flat.
+
+If the file or the row is missing (an older recording processed before this
+existed, say), you may fall back to counting from
+`analysis/sessions/YYYY-MM-DD.txt` — but apply the same exclusions above, and
+say in the report that the number was derived by hand.
+
+**If this recording was processed with `--remove-fillers`,** the filler
+columns come back blank by design — the sounds were stripped before they could
+be counted. Note in the session report that filler tracking wasn't possible
+for this recording (`words_per_minute` is still valid).
 
 ## 5. Produce the session report
 
@@ -191,7 +269,7 @@ session: 3 fill-in-the-blank, 3 sentence-correction, 3 translation, 3
 rewrite exercises. Do not introduce unrelated grammar.
 
 **Session summary** — CEFR estimate; biggest strengths; biggest weaknesses;
-grammar/vocabulary/naturalness/fluency scores (0-10, per rule 13 above);
+grammar/vocabulary/naturalness/fluency scores (0-10, per rule 14 above);
 most repeated mistake; any regressions this session (call these out by name,
 don't bury them); most important vocabulary to learn; three concrete goals
 before the next recording.
@@ -232,15 +310,22 @@ adding/updating/moving entries):
 - Append one row to "Conversation History."
 - Update "Current Priorities" and "Focus For Next Recording" based on this
   session's action plan — rank "Current Priorities" by impact (severity ×
-  occurrences, rule 14), not by raw occurrence count alone.
+  occurrences, rule 15), not by raw occurrence count alone.
 
 ## 7. Append to `analysis/scores_history.csv`
 
 Add one row: `date,cefr,grammar_score,vocabulary_score,naturalness_score,fluency_score,filler_rate_per_100_words`.
-Use the same scores as the session report. Leave `filler_rate_per_100_words`
-empty if it couldn't be measured this session (step 4). This file is
-append-only — never rewrite past rows, even if a later session reassesses
-something differently; the point is a raw historical record for graphing later.
+Use the same scores as the session report. Copy
+`filler_rate_per_100_words` from this session's row in
+`analysis/fluency_history.csv` (step 4) rather than recomputing it, and leave
+it empty if it wasn't measurable. This file is append-only — never rewrite
+past rows, even if a later session reassesses something differently; the point
+is a raw historical record for graphing later.
+
+Note the division of labour between the two CSVs: `scores_history.csv` holds
+your judgment calls (CEFR, the four 0-10 scores) and you own it;
+`fluency_history.csv` is written by the pipeline and you only ever read it —
+don't edit or append to it by hand.
 
 ## 8. Report back in chat
 
@@ -261,7 +346,7 @@ Always teach through dialogue, not lists of exercises.
 ## Rules
 
 Numbered `P1`–`P18` on purpose, so they never collide with "General rules"
-`1`–`13` above when both are visible in the same file — the two rule sets
+`1`–`15` above when both are visible in the same file — the two rule sets
 are never mixed (see "Modes in this repo"), but the numbers must stay
 unambiguous even in a long context.
 
@@ -343,7 +428,7 @@ P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
 P15. Pick ONE focus grammar pattern for the session:
      - If `Persistent Grammar Mistakes` has no entries yet (common in the
        first few sessions — a mistake only becomes "persistent" after
-       recurring, see General rule 2), skip grammar-pattern selection
+       recurring, see General rule 3), skip grammar-pattern selection
        entirely and fall back to normal topic selection (P10) — same as
        the missing-file case in P14.
      - Otherwise: `Current Priorities` and `Focus For Next Recording` are
@@ -359,7 +444,7 @@ P15. Pick ONE focus grammar pattern for the session:
        one — drill unlogged patterns before re-checking scheduled ones.
      - If several candidates are equally due (tied `Next due` dates, or
        several with no row yet), break the tie by impact — severity ×
-       occurrences, rule 14 — not plain severity or raw frequency alone.
+       occurrences, rule 15 — not plain severity or raw frequency alone.
      - Always track and log the pattern under its exact `## <Mistake
        Name>` heading from `memory.md` — never the free-text priority
        wording — so `conversation_focus_log.md` stays keyed consistently
@@ -497,11 +582,22 @@ don't invent a different layout.
 ```
 recordings/            raw audio/video files (owner drops files here)
 voice_reference/       my_reference.wav — PERMANENT, not overwritten by runs
-output/                 transcript_clean.txt + transcript_annotated.txt (overwritten each run)
+output/                 all overwritten on every run:
+  transcript_clean.txt      just the lines, one per line
+  transcript_annotated.txt  timestamps, source file, [?] markers — for reading by eye
+  lines.json                the same lines with per-line confidence/timing — analyze from this
+  fluency.json              this run's fluency measurement
 analysis/
   memory.md              the persistent, cross-session tracker — read/update every session
   memory_archive.md      long-resolved mistakes, moved out of memory.md to keep it short
-  scores_history.csv     append-only numeric history (CEFR, 4 scores, filler rate) per session
+  scores_history.csv     append-only numeric history (CEFR, 4 scores, filler rate) per session —
+                           your assessments, written by you
+  fluency_history.csv    append-only, written by the PIPELINE, never by hand: filler rate,
+                           words per minute, pause stats per run (see voxlib/fluency.py).
+                           Read it in step 4; don't edit it.
+  processed.json         written by the PIPELINE: which recordings have already been
+                           transcribed (matched by content, not filename). Guards against
+                           merging the same audio into two sessions. Don't edit it.
   conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
                                tracks which memory.md patterns have been drilled in
                                dialogue, when, and on a spaced-repetition schedule
@@ -511,5 +607,6 @@ analysis/
   sessions/
     YYYY-MM-DD.txt              archived raw clean transcript for that day
     YYYY-MM-DD.annotated.txt    archived annotated transcript (has the [?] markers)
+    YYYY-MM-DD.lines.json       archived machine-readable lines — what rule 1 reads
     YYYY-MM-DD.md                that day's full session report (Parts above)
 ```

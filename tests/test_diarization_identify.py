@@ -48,7 +48,7 @@ def test_identify_my_segments_matches_and_rejects_by_threshold():
     }
     engine = _make_engine(embeddings)
 
-    result = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
+    result, _ = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
 
     by_start = {s.start: s for s in result}
     assert by_start[0.0].is_me is True
@@ -69,7 +69,7 @@ def test_identify_my_segments_excludes_speakers_with_only_short_segments():
     embeddings = {(0.0, 2.0): MATCH}
     engine = _make_engine(embeddings)
 
-    result = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
+    result, _ = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
 
     by_start = {s.start: s for s in result}
     assert by_start[2.0].similarity == -1.0
@@ -92,7 +92,7 @@ def test_identify_my_segments_averages_only_5_longest_segments_per_speaker():
     embeddings[(short_mismatch.start, short_mismatch.end)] = NO_MATCH
     engine = _make_engine(embeddings)
 
-    result = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
+    result, _ = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
 
     # Every segment for this speaker shares the same speaker-level
     # similarity, which should stay ~1.0 since the mismatching (shortest)
@@ -104,7 +104,7 @@ def test_identify_my_segments_falls_back_when_all_embeddings_fail():
     segments = [Segment(start=0.0, end=2.0, speaker_label="SPEAKER_00")]
     engine = _make_engine({}, raise_for=frozenset({(0.0, 2.0)}))
 
-    result = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
+    result, _ = engine.identify_my_segments(Path("fake.wav"), segments, REFERENCE, threshold=0.5)
 
     assert result[0].similarity == -1.0
     assert result[0].is_me is False

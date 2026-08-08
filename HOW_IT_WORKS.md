@@ -24,40 +24,48 @@ Two stages:
 ## Stage 1 — Extraction pipeline
 
 ```
- ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
- │  Video/Audio │ ──> │   Extract    │ ──> │   Diarize    │ ──> │  Identify    │ ──> │  Transcribe  │ ──> │   Format     │
- │  (any format)│     │   Audio      │     │ "who spoke   │     │  "which one  │     │  only YOUR   │     │  chronologi- │
- │              │     │  (ffmpeg)    │     │  when"       │     │  voice is    │     │   lines      │     │  cal order + │
- │              │     │              │     │ (pyannote)   │     │   yours"     │     │  (whisper)   │     │  [?] markers │
- └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────┬───────┘
-                                                                                                                 │
-                                                                                                                 v
-                                                                                                       ┌───────────────────┐
-                                                                                                       │ transcript_clean  │
-                                                                                                       │ transcript_annot- │
-                                                                                                       │ ated (with [?])   │
-                                                                                                       └───────────────────┘
+ ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+ │  Video/Audio │ ──> │   Extract    │ ──> │   Diarize    │ ──> │    Merge     │
+ │  (any format)│     │   Audio      │     │ "who spoke   │     │  same-speaker│
+ │              │     │  (ffmpeg)    │     │  when"       │     │  fragments   │
+ │              │     │              │     │ (pyannote)   │     │  back into   │
+ │              │     │              │     │              │     │  phrases     │
+ └──────────────┘     └──────────────┘     └──────────────┘     └──────┬───────┘
+                                                                       │
+        ┌──────────────────────────────────────────────────────────────┘
+        v
+ ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌───────────────────┐
+ │  Identify    │ ──> │  Transcribe  │ ──> │   Format     │ ──> │ transcript_clean  │
+ │  "which one  │     │  only YOUR   │     │  chronologi- │     │ transcript_annot- │
+ │  voice is    │     │   lines      │     │  cal order + │     │ ated (with [?])   │
+ │   yours"     │     │  (whisper)   │     │  [?] markers │     │ lines.json        │
+ └──────────────┘     └──────────────┘     └──────────────┘     │ fluency.json      │
+                                                                └───────────────────┘
 ```
 
 | Step | Tool | What it answers |
 |---|---|---|
 | 1. Extract audio | `ffmpeg` | "Turn any video/audio container into a clean waveform" |
 | 2. Diarize | `pyannote.audio` | "At each moment, who is speaking?" (only if other voices are present) |
-| 3. Identify | cosine similarity vs. your reference voice sample | "Which speaker is *me*?" |
-| 4. Transcribe | `faster-whisper` | "What did *my* segments actually say?" |
-| 5. Format | this tool | "Put it in chronological order, one line per line, plus a `[?]` marker on low-confidence lines" |
+| 3. Merge segments | this tool | "Which of those cuts were mid-sentence pauses rather than real turn boundaries?" |
+| 4. Identify | cosine similarity vs. your reference voice sample | "Which speaker is *me*?" |
+| 5. Transcribe | `faster-whisper` | "What did *my* segments actually say?" |
+| 6. Format | this tool | "Put it in chronological order, one line per line, plus a `[?]` marker on low-confidence lines — and the same lines structured in `lines.json`" |
+| 7. Measure fluency | this tool | "How fast, how hesitant, how much pausing?" — written to `fluency.json` (see `voxlib/fluency.py`) |
 
-If it's just you talking (a journal, a monologue) — steps 2 and 3 are skipped
-entirely with `--no-diarization`, and step 4 runs on the whole file.
+If it's just you talking (a journal, a monologue) — steps 2 through 4 are
+skipped entirely with `--no-diarization`, and transcription runs on the whole
+file, where whisper does its own splitting by pauses.
 
 ## Stage 2 — Coaching memory (Claude Code + `CLAUDE.md`)
 
 ```
  ┌───────────────────┐     ┌───────────────────┐     ┌────────────────────┐
- │ transcript_clean  │ ──> │ Claude Code       │ ──> │ analysis/sessions/ │
- │ + annotated (from │     │ reads CLAUDE.md,  │     │ YYYY-MM-DD.md      │
- │  Stage 1)         │     │ analyzes grammar, │     │ (this session's    │
- │                   │     │ compares against  │     │  coaching report)  │
+ │ lines.json        │ ──> │ Claude Code       │ ──> │ analysis/sessions/ │
+ │ (+ fluency.json,  │     │ reads CLAUDE.md,  │     │ YYYY-MM-DD.md      │
+ │  from Stage 1)    │     │ skips the low-    │     │ (this session's    │
+ │                   │     │ confidence lines, │     │  coaching report)  │
+ │                   │     │ compares against  │     │                    │
  │                   │     │ memory.md         │     │                    │
  └───────────────────┘     └─────────┬─────────┘     └────────────────────┘
                                      │
@@ -97,8 +105,24 @@ of your English improving (or not) over time.
   pyannote renames speakers (`SPEAKER_00`, `SPEAKER_01`, ...) independently
   in every file. Matching by *voice similarity* to a saved reference is the
   only way to reliably say "this one is you" across many different recordings.
+- **Diarization's cuts are not sentence boundaries** — it splits wherever a
+  voice stops, mid-sentence pauses included, and whisper is markedly worse on
+  a two-second fragment than on a whole phrase: it has no surrounding words to
+  condition on. Worse, a fragment carries no judgeable grammar even when it's
+  recognized perfectly, and a mistake spanning the cut is invisible to both
+  halves. So same-speaker turns closer than `--merge-gap` are stitched back
+  together first. The raw segments stay in the cache, so the gap can be
+  retuned without re-running the model.
 - **Nothing is sent to any AI automatically** — extraction only *prepares*
   the text. What happens with it next is a separate, deliberate step.
+- **A cut between files is not a full stop** — a long session is recorded in
+  parts and the recorder cuts on a timer, so one sentence routinely ends up
+  split across two files. The half that survives on its own looks like a
+  mistake nobody made ("understand that I'm struggling" has no subject until
+  you see the previous file's last line). Both halves get flagged rather than
+  joined: whether two files really are consecutive parts of one recording is
+  something only the owner knows, and stitching unrelated recordings together
+  would invent a sentence that was never spoken.
 - **Whisper doesn't grade grammar** — it predicts the most likely words for
   a sound. That means in ambiguous, mumbled spots it can occasionally "smooth
   over" a subtle grammar slip. The `[?]` marker flags exactly those lines.
@@ -109,9 +133,16 @@ of your English improving (or not) over time.
   would look like two separate one-off mistakes instead of one recurring
   pattern. `CLAUDE.md` explicitly requires reusing existing category names
   from `memory.md`.
-- **`[?]`-marked lines are excluded from grammar judgment** — the coaching
-  workflow reads `transcript_annotated.txt` specifically to know which lines
-  are low-confidence transcription, not genuine mistakes, before scoring anything.
+- **`[?]`-marked lines are excluded from grammar judgment** — a line whisper
+  wasn't sure it heard can't tell you anything about how it was spoken, so
+  scoring one risks inventing a mistake that was never made. The coaching
+  workflow reads `lines.json`, where that flag sits on the line itself: the
+  two text documents each carry only half of what's needed (sentences in one,
+  markers in the other) and don't align one-to-one, and a rule this important
+  shouldn't rest on matching them up by eye every session. The same file's
+  totals also say how much of the session had to be discarded — past 40%,
+  the session is a different and much smaller sample than the ones before it,
+  and isn't comparable with them.
 - **Regressions are tracked distinctly, not just re-added** — a mistake
   that was marked "improved" and then reappears is a different, more
   important signal than a mistake showing up for the first time. It gets
@@ -127,6 +158,15 @@ of your English improving (or not) over time.
   not a grammar mistake — mixing it into the mistake-pattern list would
   muddy both signals. It lives in its own line in `memory.md` and its own
   column in `scores_history.csv`.
+- **Fluency is measured by code, not read off the transcript.** A metric only
+  earns its place in a months-long trend if the same input always produces the
+  same number, and a judgment call re-made each session doesn't guarantee that
+  — the rule ("`uh-huh` is agreement, not hesitation, so it doesn't count")
+  has to live somewhere executable, not in prose inside each report.
+  `voxlib/fluency.py` owns it, `analysis/fluency_history.csv` accumulates it,
+  and the coaching side only reads. Where a number genuinely can't be
+  recovered — pauses in a diarized recording, where the gap between your lines
+  is the other person talking — it's left blank rather than estimated.
 - **`memory.md` is bounded on purpose** — entries only move into it after
   they've genuinely recurred, and long-resolved ones age out into
   `memory_archive.md` after 10+ sessions of silence. The file you actually

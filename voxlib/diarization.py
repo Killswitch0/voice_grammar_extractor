@@ -22,7 +22,38 @@ from .console import track
 
 logger = logging.getLogger(__name__)
 
+# Pinned to exact commits rather than tracking each repo's default branch.
+#
+# Not primarily a security measure — the point is that this project reads a
+# months-long trend out of its own transcripts. A new model release changes
+# where segments are cut, which changes what counts as your speech, which
+# changes line counts, the low-confidence share and the mistake tallies in
+# analysis/memory.md. None of that would say why it moved: it would read as
+# your English changing when the measuring instrument changed. The
+# speaker-diarization repo was last updated 2025-09-29, so this is not
+# hypothetical.
+#
+# The cost is that model improvements now arrive only when these are bumped
+# deliberately — the same trade requirements.txt already makes for the Python
+# dependencies. Bump both, then re-run a past session and compare before
+# trusting the new numbers against the old ones.
+DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+DIARIZATION_REVISION = "3533c8cf8e369892e6b79ff1bf80f7b0286a54ee"  # 2025-09-29
+EMBEDDING_MODEL = "pyannote/embedding"
+EMBEDDING_REVISION = "4db4899737a38b2d618bbd74350915aa10293cb2"  # 2024-05-10
+
 DEFAULT_THRESHOLD = 0.75
+
+# Diarization cuts at every short pause, which is not where sentences end.
+# Consecutive turns by the same speaker closer together than this are one
+# breath of speech, not two, and are stitched back together before anything
+# else sees them. See merge_adjacent_segments for why it matters so much.
+DEFAULT_MERGE_GAP_SEC = 0.8
+
+# Whisper's encoder works on 30-second windows; beyond that it chunks
+# internally and the benefit of a longer segment stops accruing. Also keeps a
+# merged line from swallowing a whole monologue into one unreadable paragraph.
+MAX_MERGED_DURATION_SEC = 30.0
 # Below this, the best-matching speaker isn't a confident match at all (likely
 # a mismatched reference sample or wrong file) — don't trust gap-based auto
 # calibration in that case, since it would still confidently pick *someone*.
@@ -44,6 +75,60 @@ class IdentifiedSegment:
     similarity: float
 
 
+def merge_adjacent_segments(
+    segments: list[Segment],
+    max_gap: float = DEFAULT_MERGE_GAP_SEC,
+    max_duration: float = MAX_MERGED_DURATION_SEC,
+) -> list[Segment]:
+    """
+    Stitches consecutive segments of the SAME speaker back together when only
+    a short pause separates them.
+
+    Diarization answers "who is speaking when", and it cuts wherever the voice
+    stops — mid-sentence pauses included. Each fragment then goes to whisper on
+    its own, and whisper is markedly worse on one or two seconds of audio than
+    on ten: it has no surrounding words to condition on. In this project's
+    archived sessions the low-confidence lines have a median length of 1-2
+    words while the confident ones run 6-13, which is the same fact seen from
+    the other end.
+
+    That costs twice over. Recognition quality drops, so more lines get the
+    [?] marker and are excluded from grammar judgment entirely. And a fragment
+    can't be judged grammatically even when it IS recognized correctly — "So,
+    and I just..." has no verifiable grammar in it, and a mistake spanning the
+    cut is invisible to both halves.
+
+    Only adjacent entries in start-order are considered, so a turn by someone
+    else in between always blocks the merge: A, B, A stays three segments.
+    Overlaps (a negative gap) merge too — they're the same voice continuing.
+    """
+    if max_gap <= 0 or not segments:
+        return list(segments)
+
+    ordered = sorted(segments, key=lambda s: (s.start, s.end))
+    merged: list[Segment] = [
+        Segment(start=ordered[0].start, end=ordered[0].end, speaker_label=ordered[0].speaker_label)
+    ]
+
+    for segment in ordered[1:]:
+        current = merged[-1]
+        joinable = (
+            segment.speaker_label == current.speaker_label
+            and segment.start - current.end <= max_gap
+            and segment.end - current.start <= max_duration
+        )
+        if joinable:
+            # max() rather than assignment: a fully-contained overlapping
+            # segment must not shorten the one it's being folded into.
+            current.end = max(current.end, segment.end)
+        else:
+            merged.append(
+                Segment(start=segment.start, end=segment.end, speaker_label=segment.speaker_label)
+            )
+
+    return merged
+
+
 class DiarizationEngine:
     def __init__(self, hf_token: str, device: str = "cpu"):
         import torch
@@ -51,14 +136,16 @@ class DiarizationEngine:
 
         self.device = torch.device(device)
 
-        logger.info("Loading diarization model (pyannote/speaker-diarization-community-1)...")
+        logger.info("Loading diarization model (%s @ %s)...", DIARIZATION_MODEL, DIARIZATION_REVISION[:8])
         self.diarization_pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-community-1", token=hf_token
+            DIARIZATION_MODEL, revision=DIARIZATION_REVISION, token=hf_token
         )
         self.diarization_pipeline.to(self.device)
 
-        logger.info("Loading voice embedding model (pyannote/embedding)...")
-        embedding_model = Model.from_pretrained("pyannote/embedding", token=hf_token)
+        logger.info("Loading voice embedding model (%s @ %s)...", EMBEDDING_MODEL, EMBEDDING_REVISION[:8])
+        embedding_model = Model.from_pretrained(
+            EMBEDDING_MODEL, revision=EMBEDDING_REVISION, token=hf_token
+        )
         self.embedding_inference = Inference(embedding_model, window="whole")
         self.embedding_inference.to(self.device)
 
@@ -105,12 +192,16 @@ class DiarizationEngine:
         reference_embedding: np.ndarray,
         threshold: float | None = None,
         min_segment_duration: float = 0.3,
-    ) -> list[IdentifiedSegment]:
+    ) -> tuple[list[IdentifiedSegment], float]:
         """
         For each unique speaker_label, computes an average embedding across all
         of that speaker's segments (more robust than a single short clip),
         compares it to the reference, and marks all of that speaker's segments
         as "mine" or not.
+
+        Returns the segments together with the threshold that was actually
+        applied — with auto-calibration that value is only decided in here,
+        and callers need it to report what the run did (see --dry-run).
         """
         by_speaker: dict[str, list[Segment]] = {}
         for seg in segments:
@@ -148,7 +239,7 @@ class DiarizationEngine:
                     similarity=sim,
                 )
             )
-        return result
+        return result, effective_threshold
 
     @staticmethod
     def _suggest_threshold_from_gap(speaker_similarity: dict[str, float]) -> tuple[float, float] | None:
@@ -167,6 +258,43 @@ class DiarizationEngine:
         biggest_gap, idx = max(gaps)
         suggested = (values[idx] + values[idx + 1]) / 2
         return suggested, biggest_gap
+
+    @staticmethod
+    def _warn_on_ambiguous_match(speaker_similarity: dict[str, float], threshold: float) -> None:
+        """
+        Whether a speaker is "me" is decided per speaker, independently — so
+        nothing structurally stops two people from clearing the same bar, and
+        gap-based auto-calibration makes it easy: the biggest gap can fall
+        between speakers 2 and 3, putting BOTH speaker 1 and 2 above the
+        threshold. The result is someone else's sentences arriving in a
+        document whose entire premise is that it contains only yours, with
+        nothing in the output saying so. Hence a warning at the one place
+        every code path passes through.
+        """
+        matched = sorted(
+            (sp for sp, sim in speaker_similarity.items() if sim >= threshold),
+            key=lambda sp: speaker_similarity[sp],
+            reverse=True,
+        )
+
+        if not matched:
+            logger.warning(
+                "No speaker passed the threshold %.2f (best similarity to your reference voice "
+                "was %.2f) — this recording would produce an empty transcript. Either the "
+                "reference sample doesn't match this recording, or the threshold is too high: "
+                "lower --threshold, or re-cut the reference with identify_speaker.py.",
+                threshold, max(speaker_similarity.values(), default=-1.0),
+            )
+        elif len(matched) > 1:
+            logger.warning(
+                "%d speakers passed the threshold %.2f (%s) — all of them will be treated as "
+                "you, so someone else's speech will end up in your transcript. Raise "
+                "--threshold above %.2f to keep only the closest match, and check the result "
+                "with --dry-run first.",
+                len(matched), threshold,
+                ", ".join(f"{sp}={speaker_similarity[sp]:.2f}" for sp in matched),
+                speaker_similarity[matched[1]],
+            )
 
     @staticmethod
     def resolve_threshold(speaker_similarity: dict[str, float], explicit_threshold: float | None) -> float:
@@ -195,22 +323,27 @@ class DiarizationEngine:
                         "might separate you from the rest more precisely (currently using --threshold %.2f).",
                         gap, suggested, explicit_threshold,
                     )
-            return explicit_threshold
+            resolved = explicit_threshold
+        else:
+            top_similarity = max(speaker_similarity.values(), default=-1.0)
+            if gap_result is None or top_similarity < MIN_CONFIDENT_SIMILARITY:
+                logger.warning(
+                    "Could not confidently auto-calibrate a threshold (best similarity to the "
+                    "reference voice was %.2f) — falling back to the default %.2f. Pass --threshold "
+                    "explicitly if this misidentifies your lines.",
+                    top_similarity, DEFAULT_THRESHOLD,
+                )
+                resolved = DEFAULT_THRESHOLD
+            else:
+                suggested, _ = gap_result
+                logger.info(
+                    "Auto-selected threshold %.2f based on the gap in voice similarity to the "
+                    "reference (no --threshold given).",
+                    suggested,
+                )
+                resolved = suggested
 
-        top_similarity = max(speaker_similarity.values(), default=-1.0)
-        if gap_result is None or top_similarity < MIN_CONFIDENT_SIMILARITY:
-            logger.warning(
-                "Could not confidently auto-calibrate a threshold (best similarity to the "
-                "reference voice was %.2f) — falling back to the default %.2f. Pass --threshold "
-                "explicitly if this misidentifies your lines.",
-                top_similarity, DEFAULT_THRESHOLD,
-            )
-            return DEFAULT_THRESHOLD
-
-        suggested, _ = gap_result
-        logger.info(
-            "Auto-selected threshold %.2f based on the gap in voice similarity to the "
-            "reference (no --threshold given).",
-            suggested,
-        )
-        return suggested
+        # Single exit point on purpose: every caller (fresh identification and
+        # the cache-hit path in pipeline.py alike) gets the same sanity check.
+        DiarizationEngine._warn_on_ambiguous_match(speaker_similarity, resolved)
+        return resolved
