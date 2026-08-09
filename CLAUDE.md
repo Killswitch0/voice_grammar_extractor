@@ -101,9 +101,9 @@ their rules together in one response.
     down session to session with no real change is noise, not signal, and
     undermines the whole point of tracking it over time.
 15. **Rank mistakes by impact, not raw frequency.** Wherever mistakes get
-    ranked for attention — `Current Priorities` in `memory.md` (step 6) and
+    ranked for attention — `Current Priorities` in `memory.md` (step 6b) and
     focus selection in Conversation Practice Mode (P15) — use
-    `impact = severity × occurrences`, not occurrence count alone. A
+    `impact = severity × occurrence rate`, not occurrence count alone. A
     high-frequency but low-severity error (e.g. a missing article) should
     not automatically outrank a lower-frequency error that actually breaks
     communication (e.g. wrong verb agreement) — severity is the multiplier
@@ -111,6 +111,12 @@ their rules together in one response.
     rule 5. When comparing across sessions, weight recent sessions' occurrences
     more than older ones so a mistake that's fading doesn't keep outranking
     one that's actively getting worse.
+
+    **Don't do this arithmetic by hand — read the `Impact` column of
+    `python -m voxlib.mistakes`** (see step 6). It normalizes each session's
+    count per 1,000 reliable words first, which matters because sessions
+    differ in length by up to 40%, and it applies the recency weighting
+    consistently instead of however it felt this time.
 
 # Workflow: when asked to analyze a new recording
 
@@ -193,16 +199,36 @@ mistake — track it separately, don't fold it into the mistake categories above
 `analysis/fluency_history.csv` (see `voxlib/fluency.py`). Read the row for
 this session from there:
 
-- `low_confidence_share` — **read this first.** The fraction of lines
-  whisper wasn't sure about (the `[?]` ones). It measures the recording, not
-  the speaker. Every word-based number below is computed over the remaining
-  reliable lines only, so when this moves, the others change meaning.
+- `low_confidence_word_share` — **read this first, and use this one, not the
+  per-line figure.** The fraction of your *words* whisper wasn't sure about.
+  It measures the recording, not the speaker. Every word-based number below is
+  computed over the remaining reliable lines only, so when this moves, the
+  others change meaning.
+- `low_confidence_share` — the same thing counted by *line*. Reported because
+  it's what the `[?]` markers look like when you scroll the annotated
+  document, but **do not draw conclusions from it**: a two-word "Yeah." counts
+  the same as a twenty-two-word sentence, and short backchannels are exactly
+  where whisper is least confident. On 2026-08-08 it read 57% while the word
+  share read 15%. The two series so far are 24/30/60/57% by line against
+  12/11/23/15% by word.
 - `fillers_per_100_words` — hesitation sounds per 100 **reliable** words.
   "uh-huh" and "mm-hmm" are backchannel agreement, not hesitation, and are
   deliberately excluded. Treat the number as a **lower bound**: whisper drops
   many hesitations before they ever reach the transcript.
-- `words_per_minute` — speaking rate across your own reliable speech.
-  Comparable between solo and diarized recordings.
+- `discourse_markers_per_100_words` — "you know", "I mean", "kind of" and
+  friends per 100 reliable words, with the per-marker breakdown in
+  `output/fluency.json`. For this speaker these run 30-50x the filler rate and
+  are the actual fluency problem, so report them alongside it, never folded
+  into it. `like` and `so` are deliberately **not** counted (too ambiguous to
+  define stably — see `voxlib/discourse.py`); if they sound excessive in a
+  session, say so in prose and don't invent a number.
+- `words_per_minute` — speaking rate. **Compare it only against rows with the
+  same `speech_time_basis`.** With diarization the denominator is VAD-tight
+  speech (`vad`); without it, whisper's own segments include the pauses inside
+  them (`segment`), and the lines cover 93% of the wall clock instead of 55%.
+  Measured here, the same speaker reads 104.7 wpm diarized and 58.1 solo. If
+  the basis changed since the last session, say the rate isn't comparable
+  rather than reporting a drop.
 - `median_pause_sec` / `long_pauses` — **solo recordings only.** Blank for
   diarized ones, because there the gap between two of your lines is mostly
   the other person's turn. (These use every line, not just reliable ones — a
@@ -212,8 +238,8 @@ Compare against the previous rows in `analysis/fluency_history.csv` for the
 trend. An empty cell means "not measured", never zero — if a metric is blank,
 say it wasn't measurable this session rather than reporting 0.
 
-**If `low_confidence_share` is 0.4 or higher, or has moved sharply since the
-last sessions, say so explicitly in the session report and do NOT read a
+**If `low_confidence_word_share` is 0.4 or higher, or has moved sharply since
+the last sessions, say so explicitly in the session report and do NOT read a
 fluency trend out of it.** At that level most of the transcript is excluded
 from grammar judgment too, so the session is a smaller and different sample
 than the ones before it — a drop in any score would be describing the
@@ -223,6 +249,17 @@ share hit 60% against 24-30% before, 17 of the 20 counted "fillers" sat
 inside `[?]` lines, and the resulting "10x jump in hesitation" was an
 artifact — the reliable-line series for those three sessions is
 0.05 / 0.00 / 0.12, essentially flat.
+
+**But it has also fired falsely, which is why the word share is the one that
+counts.** Read by line, 2026-08-06 and 2026-08-08 looked like a two-session
+collapse in recording quality, and "fix the recording setup" was written into
+`memory.md` as goal zero, above every grammar item. Measured by word those
+sessions lost 23% and 15% — ordinary. What the line count was really detecting
+is that the owner says "Yeah." a lot and that whisper scores two-word
+utterances badly: on 2026-08-08, 79 of the 89 flagged lines were under three
+seconds, and 60 of those were some form of "yes"/"yeah"/"thank you", 217 words
+between them. Don't spend the owner's top priority on the microphone unless
+the *word* share says so.
 
 If the file or the row is missing (an older recording processed before this
 existed, say), you may fall back to counting from
@@ -259,8 +296,11 @@ only if appropriate — matched to their current level, not above it.
 auxiliary verbs, if vs. whether, countable nouns, word order, question
 formation, missing subjects, missing "to", etc.), ranked by importance.
 
-**Fluency** — the filler-word rate from step 4 and how it compares to recent
-sessions (or a note that it couldn't be measured this time).
+**Fluency** — the filler-word rate and the discourse-marker rate from step 4,
+each with how it compares to recent sessions (or a note that it couldn't be
+measured this time). Report the marker breakdown, not just the total: "you
+know" 88× is a different instruction from 88 markers spread over a dozen
+phrases.
 
 **Action plan** — max 5 ranked priorities, each with a one-line "why."
 
@@ -274,7 +314,52 @@ most repeated mistake; any regressions this session (call these out by name,
 don't bury them); most important vocabulary to learn; three concrete goals
 before the next recording.
 
-## 6. Update `analysis/memory.md`
+## 6. Record this session's counts in `analysis/mistakes.csv`
+
+**Do this before touching `memory.md`.** `memory.md` is prose, rewritten from
+its own previous prose every session; by the fourth session its occurrence
+counters are a retelling of a retelling, and things have already been lost
+that way (2026-08-04's report tracked a `"just" + modal "can"` pattern that
+never reached `memory.md` at all). The CSV is the record; `memory.md` is the
+readable rendering of it.
+
+One row per tracked category, **including the ones that stayed clean** — an
+absence that isn't written down is indistinguishable from nobody having
+looked, and the absence streak in step 6b is built entirely out of those zero
+rows:
+
+```bash
+python -m voxlib.mistakes add --date YYYY-MM-DD --reliable-words <N> \
+  "Article Errors:3:6" "Third-Person \"-s\" Agreement:3:0" 'Conditional "will" In If-Clauses:4:'
+```
+
+- `--reliable-words` comes from this session's row in
+  `analysis/fluency_history.csv` (step 4). Don't recount it.
+- Category names must match the `## <Mistake Name>` headings in `memory.md`
+  exactly (rule 13) — that string is the join key between the two files.
+- Severity is the same rating used in the session report's mistake table.
+- **An empty occurrences field means "no opportunity to appear", not "clean".**
+  Use it when the structure never came up: 2026-08-08 produced zero if-clauses,
+  so "conditional will" was untested that session, not fixed. A `0` means it
+  had the chance and stayed clean, and only a `0` counts toward promotion.
+- Append-only, and it refuses a date it already holds — recording a session
+  twice would double its counts, the same failure `processed.json` guards
+  against upstream.
+
+Then read the trend back and use it for the next two steps:
+
+```bash
+python -m voxlib.mistakes            # ranked table
+python -m voxlib.mistakes show --category "Article Errors"
+```
+
+The `Impact` column is rule 15 carried out arithmetically (severity ×
+recency-weighted rate per 1,000 reliable words), so **rank "Current
+Priorities" by that column rather than re-deriving a ranking by eye.** Rates
+are normalized per 1,000 reliable words because sessions differ in length —
+5 errors in 2,154 words and 13 in 1,956 are not comparable as raw counts.
+
+## 6b. Update `analysis/memory.md`
 
 Read it, then update it in place — never recreate it from scratch if it
 already exists. Use the structure below exactly (don't reformat beyond
@@ -285,8 +370,12 @@ adding/updating/moving entries):
 - If a tracked mistake didn't appear this session, leave its counters alone
   but check how long it's been absent (see the rule below).
 - Move a mistake from "Persistent Grammar Mistakes" to "Improvements" once
-  it hasn't appeared for **3 consecutive sessions** — this is the actual
-  signal the owner cares about, not a static list of every mistake ever made.
+  it hasn't appeared for **3 consecutive sessions**. Take this from the
+  `Absent` column of `python -m voxlib.mistakes` (starred rows are the ones
+  that qualify) rather than counting sessions by hand — and note that a
+  session where the structure was never attempted does **not** count toward
+  the three. This is the actual signal the owner cares about, not a static
+  list of every mistake ever made.
 - If a mistake regressed (see step 3), move it back out of "Improvements"
   into "Persistent Grammar Mistakes" and reset its "absence streak."
 - **Keep the file bounded.** Cap examples at 3 per mistake (replace the
@@ -294,8 +383,10 @@ adding/updating/moving entries):
   sessions**, move it out of `memory.md` entirely into
   `analysis/memory_archive.md` (create it if it doesn't exist) — full
   history is preserved, but the active file the owner actually reads stays short.
-- Update "Fluency Indicators" with a one-line trend summary (not a full
-  table — the full numeric history lives in `scores_history.csv`, see step 7).
+- Update "Fluency Indicators" with a one-line trend summary covering the
+  filler rate, the discourse-marker rate and the word-based low-confidence
+  share (not a full table — the full numeric history lives in
+  `scores_history.csv` and `fluency_history.csv`, see step 7).
 - Update "Vocabulary To Replace" and "Useful Vocabulary Learned" from this
   session's Vocabulary findings (step 5) — these tables are what
   Conversation Practice Mode draws on to weave vocabulary into questions;
@@ -309,8 +400,8 @@ adding/updating/moving entries):
   rather than letting the list grow forever.
 - Append one row to "Conversation History."
 - Update "Current Priorities" and "Focus For Next Recording" based on this
-  session's action plan — rank "Current Priorities" by impact (severity ×
-  occurrences, rule 15), not by raw occurrence count alone.
+  session's action plan — rank "Current Priorities" by the `Impact` column
+  from step 6 (rule 15), not by raw occurrence count alone.
 
 ## 7. Append to `analysis/scores_history.csv`
 
@@ -322,10 +413,17 @@ it empty if it wasn't measurable. This file is append-only — never rewrite
 past rows, even if a later session reassesses something differently; the point
 is a raw historical record for graphing later.
 
-Note the division of labour between the two CSVs: `scores_history.csv` holds
-your judgment calls (CEFR, the four 0-10 scores) and you own it;
-`fluency_history.csv` is written by the pipeline and you only ever read it —
-don't edit or append to it by hand.
+Note the division of labour between the three CSVs:
+
+| File | Written by | Holds |
+|---|---|---|
+| `scores_history.csv` | you, by hand | your judgment calls — CEFR and the four 0-10 scores |
+| `mistakes.csv` | you, via `python -m voxlib.mistakes add` (step 6) | which mistakes occurred how often, per session |
+| `fluency_history.csv` | the pipeline | how the recording came out and how it was spoken |
+
+You own the first two. `fluency_history.csv` you only ever read — don't edit
+or append to it by hand. All three are append-only: never rewrite a past row,
+even if a later session reassesses something differently.
 
 ## 8. Report back in chat
 
@@ -443,8 +541,10 @@ P15. Pick ONE focus grammar pattern for the session:
        logged row yet counts as more overdue than any category that has
        one — drill unlogged patterns before re-checking scheduled ones.
      - If several candidates are equally due (tied `Next due` dates, or
-       several with no row yet), break the tie by impact — severity ×
-       occurrences, rule 15 — not plain severity or raw frequency alone.
+       several with no row yet), break the tie by impact (rule 15) — read the
+       `Impact` column of `python -m voxlib.mistakes`, not plain severity or
+       raw frequency. This mode never writes to `mistakes.csv`, only reads it,
+       the same way it treats `memory.md`.
      - Always track and log the pattern under its exact `## <Mistake
        Name>` heading from `memory.md` — never the free-text priority
        wording — so `conversation_focus_log.md` stays keyed consistently
@@ -592,6 +692,11 @@ analysis/
   memory_archive.md      long-resolved mistakes, moved out of memory.md to keep it short
   scores_history.csv     append-only numeric history (CEFR, 4 scores, filler rate) per session —
                            your assessments, written by you
+  mistakes.csv           append-only, written by YOU via `python -m voxlib.mistakes add`:
+                           one row per tracked mistake category per session, with the
+                           session's reliable-word count as the denominator. The machine-
+                           readable spine of memory.md's "Persistent Grammar Mistakes" —
+                           read the trend with `python -m voxlib.mistakes`
   fluency_history.csv    append-only, written by the PIPELINE, never by hand: filler rate,
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.

@@ -91,3 +91,20 @@ def test_claude_md_knows_about_every_file_the_pipeline_writes(filename):
     assert filename in CLAUDE_MD.read_text(encoding="utf-8"), (
         f"CLAUDE.md never mentions {filename}, which run_pipeline writes"
     )
+
+
+@pytest.mark.parametrize("column", ["low_confidence_word_share", "fillers_per_100_words",
+                                    "discourse_markers_per_100_words", "words_per_minute"])
+def test_claude_md_tells_the_workflow_to_read_every_measured_column(column):
+    """
+    A measurement nothing instructs the analysis to look at may as well not
+    exist: the pipeline would keep writing it to fluency_history.csv every
+    session and no report would ever mention it. Step 4 is where the workflow
+    is told which columns to read, so a new metric has to reach that list.
+    """
+    from voxlib.fluency import HISTORY_COLUMNS
+
+    assert column in HISTORY_COLUMNS, f"{column} is no longer a measured column"
+    assert column in CLAUDE_MD.read_text(encoding="utf-8"), (
+        f"the pipeline measures {column} but CLAUDE.md never tells the workflow to read it"
+    )
