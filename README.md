@@ -338,12 +338,15 @@ Alongside the transcripts, every run measures:
 
 | Metric | Meaning |
 |---|---|
-| `low_confidence_share` | Fraction of lines whisper wasn't sure about (the `[?]` ones) |
+| `low_confidence_word_share` | Fraction of your **words** whisper wasn't sure about — the one to act on |
+| `low_confidence_share` | The same thing counted by **line**; reported for context, easily misread (see below) |
 | `fillers_per_100_words` | Hesitation sounds (`um`, `uh`, `erm`) per 100 reliable words |
-| `words_per_minute` | Speaking rate across your own reliable speech |
+| `discourse_markers_per_100_words` | `you know`, `I mean`, `kind of`… per 100 reliable words, with a per-marker breakdown in `fluency.json` |
+| `words_per_minute` | Speaking rate across your own reliable speech — compare only within the same `speech_time_basis` |
+| `speech_time_basis` | `vad` (diarization gave tight speech turns) or `segment` (whisper's own, pauses included) |
 | `median_pause_sec`, `long_pauses` | Gaps between your consecutive lines — **solo recordings only** |
 
-Three deliberate choices worth knowing about:
+Four deliberate choices worth knowing about:
 
 - **Only lines whisper was confident about are counted.** A mis-recognized
   line says nothing about how you actually spoke, so `[?]` lines are excluded
@@ -351,9 +354,20 @@ Three deliberate choices worth knowing about:
   than it sounds: in this project's own history, one session had 60% of its
   lines marked `[?]`, and 17 of its 20 "fillers" were inside them. Counted
   over reliable lines, its apparent 10x jump in hesitation disappears.
-  `low_confidence_share` is reported alongside for exactly that reason, and
-  the run prints a warning when it goes above 40% — at that point the number
-  is describing your microphone, not your English.
+- **How much was lost is measured by word, not by line** — and the run only
+  warns above 40% of *words*. Counted by line, a two-word "Yeah." weighs as
+  much as a twenty-two-word sentence, and short backchannels are precisely
+  where whisper's confidence is worst: in one session here, 79 of the 89
+  flagged lines were under three seconds and most were some form of "yes". By
+  line that session lost 57% of the transcript; by word, 15%. Warning on the
+  line figure would tell you to buy a microphone when nothing is wrong with
+  the one you have.
+- **Discourse markers are counted separately from hesitation sounds**, and
+  never removed from the text. For some speakers `you know` does the job `um`
+  does for others — in this project's transcripts it runs 30-50x the filler
+  rate — and folding the two together would hide both. `like` and `so` are
+  deliberately **not** counted: they're too ambiguous to define stably, and a
+  metric whose definition drifts can't be compared against itself later.
 - **`uh-huh` and `mm-hmm` are not counted as hesitation.** They're backchannel
   agreement — the spoken equivalent of a nod — so counting them would say
   something about how much you were listening, not how much you hesitated.

@@ -92,6 +92,7 @@ of your English improving (or not) over time.
 | `analysis/memory.md` | The one file that persists — current level, active mistakes with occurrence counts, vocabulary to learn, next 3-5 goals |
 | `analysis/memory_archive.md` | Long-resolved mistakes get moved here so `memory.md` itself stays short and readable |
 | `analysis/scores_history.csv` | Append-only numeric record (CEFR, scores, filler rate) per session — for graphing progress later, separate from the readable text in `memory.md` |
+| `analysis/mistakes.csv` | Append-only record of which mistake categories occurred how often, per session, against that session's reliable-word count. The machine-readable spine under `memory.md`'s prose counters: `python -m voxlib.mistakes` renders it as a trend table ranked by impact |
 | `analysis/conversation_focus_log.md` | Written only by Conversation Practice Mode (the other mode in this same `CLAUDE.md`, triggered by "let's practice" instead of "analyze the recording") — tracks which `memory.md` patterns were drilled in dialogue and when. Recording analysis reads it for context (to flag a mistake that was drilled in practice but is still occurring) but never writes to it — see "Same repo, second mode" below |
 
 ## Why it's built this way
@@ -158,6 +159,20 @@ of your English improving (or not) over time.
   not a grammar mistake — mixing it into the mistake-pattern list would
   muddy both signals. It lives in its own line in `memory.md` and its own
   column in `scores_history.csv`.
+- **Phrase-fillers are tracked separately again.** "You know", "I mean" and
+  their relatives do the same job as "um" for some speakers, but they're
+  ordinary words, so the hesitation counter can't see them and
+  `--remove-fillers` deliberately leaves them alone. Counting them in with
+  hesitation sounds would blur two different habits together; counting them
+  by eye each session is how the number stops being comparable. So
+  `voxlib/discourse.py` counts them, on their own axis.
+- **Mistake counts are data, not prose.** `memory.md` is rewritten from its
+  own previous text every session, which makes it a retelling of a retelling
+  by the fourth one — patterns have already gone missing that way. The counts
+  live in `analysis/mistakes.csv` with the session's word count beside them,
+  so rates can be normalized (sessions here range 1,844-2,547 reliable words),
+  absences can be counted mechanically, and "no opportunity to make this
+  mistake" stays distinct from "made it zero times".
 - **Fluency is measured by code, not read off the transcript.** A metric only
   earns its place in a months-long trend if the same input always produces the
   same number, and a judgment call re-made each session doesn't guarantee that

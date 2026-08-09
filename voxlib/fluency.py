@@ -22,9 +22,21 @@ inside `[?]` lines, and that session's low-confidence share was 60% against
 1 / 0 / 3 rather than 1 / 1 / 20: what looked like a sharp regression in
 fluency was the recording quality falling over.
 
-Which is why `low_confidence_share` is itself reported and tracked. When it
+Which is why the low-confidence share is itself reported and tracked. When it
 moves, every other number here changes meaning, and a metric that can quietly
 switch populations underneath a trend line is worse than no metric.
+
+**The share is reported two ways, and the word-weighted one is the one to act
+on.** Counted by line, a two-word "Yeah." weighs exactly as much as a
+twenty-two-word sentence, and short backchannels are precisely where whisper's
+avg_logprob is worst — it has almost no context to be confident from. On
+2026-08-08, 79 of the 89 flagged lines were under three seconds and 60 of them
+were some form of "yes"/"yeah"/"thank you", 217 words in total. By line that
+session lost 57% of the transcript; by word it lost 15%. Across the four
+sessions on record the two series read 24/30/60/57% against 12/11/23/15% — the
+line-based one looks like a collapse in recording quality and the word-based one
+looks like ordinary variation. The second is the true statement about how much
+analyzable speech survived, so it is what `warn_if_unreliable` fires on.
 
 What's measured:
 
@@ -32,11 +44,25 @@ What's measured:
     using the same pattern --remove-fillers strips (see filler_filter.py), so
     the metric can never disagree with the cleanup. A LOWER BOUND on real
     disfluency: whisper drops many hesitations before we ever see the text.
+  - **Discourse-marker rate** — "you know", "I mean", "kind of" and friends per
+    100 reliable words (see discourse.py). Tracked separately from the filler
+    rate because they are a different thing measured a different way, and
+    because for this speaker they are the larger problem by two orders of
+    magnitude. Never stripped from the text, only counted.
   - **Speaking rate** — words per minute across your own reliable speech.
-    Comparable between solo and diarized recordings.
-  - **Low-confidence share** — what fraction of your lines whisper wasn't sure
-    about. A quality-of-input measure, not a quality-of-speech one: high
-    values mean the microphone, not the speaker.
+    **Only comparable against sessions recorded in the same mode**, which is
+    why `speech_time_basis` is reported next to it. The denominator is the sum
+    of your line durations, and a "line" is a different object in the two
+    modes: diarization hands over VAD-tight turns, whisper's own segmentation
+    hands over long stretches that swallow the pauses inside them. Measured on
+    this project's own recordings, the lines cover 55% of the wall clock in a
+    diarized session against 93% in a solo one — median line length 2.7s
+    against 18s. So the same speaker at the same speed reads as roughly 105
+    wpm diarized and 58 wpm solo, and reading that gap as a collapse in
+    fluency would be the 2026-08-06 filler artifact all over again.
+  - **Low-confidence share** — what fraction of your lines, and of your words,
+    whisper wasn't sure about. A quality-of-input measure, not a
+    quality-of-speech one: high values mean the microphone, not the speaker.
   - **Pauses** — gaps between your consecutive lines. Computed over ALL lines,
     unlike the word metrics: a timestamp is valid whether or not the words on
     it were recognized correctly. Solo recordings only, though, and
@@ -51,12 +77,13 @@ import csv
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from statistics import median
 from typing import Optional
 
+from . import discourse
 from .filler_filter import FILLER_SOUND_PATTERN
 from .formatter import DEFAULT_LOW_CONFIDENCE_THRESHOLD, is_low_confidence
 
@@ -66,10 +93,22 @@ logger = logging.getLogger(__name__)
 # rather than ordinary sentence spacing. Only meaningful for solo recordings.
 LONG_PAUSE_SEC = 2.0
 
-# Above this share of [?] lines, the recording is telling you about itself
-# rather than about the speaker: most of the transcript is excluded from
-# grammar judgment, and the word metrics rest on whatever is left.
+# Above this share of low-confidence WORDS (not lines — see the module
+# docstring), the recording is telling you about itself rather than about the
+# speaker: that much of the transcript is excluded from grammar judgment, and
+# the word metrics rest on whatever is left.
 LOW_CONFIDENCE_WARN_SHARE = 0.4
+
+# What the words_per_minute denominator was built from. Diarization hands over
+# VAD-tight turns; without it, whisper's own segments run long and include the
+# pauses inside them. See the module docstring for the measured difference.
+VAD_BASIS = "vad"
+SEGMENT_BASIS = "segment"
+
+# Everything on FluencyMetrics goes into the history CSV except this, which is a
+# per-marker mapping: it belongs in fluency.json, where nesting is free, not in
+# a column-per-session table that would need a new column per marker.
+_BREAKDOWN_FIELD = "discourse_marker_breakdown"
 
 HISTORY_COLUMNS = [
     "run_at",
@@ -80,12 +119,16 @@ HISTORY_COLUMNS = [
     "total_lines",
     "low_confidence_lines",
     "low_confidence_share",
+    "low_confidence_word_share",
     "total_words",
     "reliable_words",
     "speech_minutes",
     "words_per_minute",
+    "speech_time_basis",
     "filler_count",
     "fillers_per_100_words",
+    "discourse_marker_count",
+    "discourse_markers_per_100_words",
     "median_pause_sec",
     "long_pauses",
 ]
@@ -95,22 +138,37 @@ HISTORY_COLUMNS = [
 class FluencyMetrics:
     total_lines: int
     low_confidence_lines: int
-    # 0.0-1.0. Read this before reading anything else here: it says how much of
-    # the transcript the rest of the numbers are actually based on.
+    # 0.0-1.0, by line. Kept because it's what the [?] markers in the annotated
+    # document look like when you scroll through them, and because the first
+    # four sessions were logged this way — but it over-weights short
+    # backchannels, so don't act on it. See low_confidence_word_share.
     low_confidence_share: float
+    # 0.0-1.0, by word. Read this before reading anything else here: it says how
+    # much of the analyzable transcript the rest of the numbers rest on.
+    low_confidence_word_share: float
     total_words: int
     # The denominator for every rate below — words on lines whisper was
     # confident about.
     reliable_words: int
     speech_minutes: float
     words_per_minute: float
+    # "vad" (diarization supplied tight speech turns) or "segment" (whisper's
+    # own boundaries, which include the pauses inside them). words_per_minute
+    # means a different thing under each, so never compare across the two.
+    speech_time_basis: str
     # None when --remove-fillers stripped them before we could count: reporting
     # 0 there would look like flawless delivery instead of a missing reading.
     filler_count: Optional[int]
     fillers_per_100_words: Optional[float]
+    # Never None: --remove-fillers strips um/uh, not "you know", so these stay
+    # measurable on every run. See discourse.py.
+    discourse_marker_count: int
+    discourse_markers_per_100_words: float
     # None for diarized recordings — see the module docstring.
     median_pause_sec: Optional[float]
     long_pauses: Optional[int]
+    # Which markers, not just how many. JSON only, never a CSV column.
+    discourse_marker_breakdown: dict = field(default_factory=dict)
 
 
 def count_words(text: str) -> int:
@@ -121,10 +179,22 @@ def count_fillers(text: str) -> int:
     return len(FILLER_SOUND_PATTERN.findall(text))
 
 
+def count_discourse_markers(text: str) -> int:
+    return discourse.count_all(text)
+
+
 def _rate_per_100_words(count: int, total_words: int) -> float:
     if total_words <= 0:
         return 0.0
     return round(count / total_words * 100, 2)
+
+
+def _word_share(total_words: int, reliable_words: int) -> float:
+    """How much of the SPEECH was lost to low confidence, as opposed to how many
+    lines were — the distinction the module docstring is about."""
+    if total_words <= 0:
+        return 0.0
+    return round((total_words - reliable_words) / total_words, 3)
 
 
 def _pause_stats(lines) -> tuple[Optional[float], Optional[int]]:
@@ -178,6 +248,11 @@ def compute_fluency(
     filler_count = None if fillers_removed else sum(count_fillers(line.text) for line in reliable)
     filler_rate = None if filler_count is None else _rate_per_100_words(filler_count, reliable_words)
 
+    # Same population as the filler rate — reliable lines only. A "you know"
+    # inside a line whisper misheard is no more trustworthy than a mistake in it.
+    breakdown = discourse.merge_counts([discourse.count_markers(line.text) for line in reliable])
+    marker_count = sum(breakdown.values())
+
     # Pauses come from timestamps, which are valid regardless of whether the
     # words on them were recognized correctly — so they use every line.
     if use_diarization:
@@ -189,14 +264,19 @@ def compute_fluency(
         total_lines=len(lines),
         low_confidence_lines=low_confidence_lines,
         low_confidence_share=round(share, 3),
+        low_confidence_word_share=_word_share(total_words, reliable_words),
         total_words=total_words,
         reliable_words=reliable_words,
         speech_minutes=round(speech_minutes, 2),
         words_per_minute=round(reliable_words / speech_minutes, 1) if speech_minutes > 0 else 0.0,
+        speech_time_basis=VAD_BASIS if use_diarization else SEGMENT_BASIS,
         filler_count=filler_count,
         fillers_per_100_words=filler_rate,
+        discourse_marker_count=marker_count,
+        discourse_markers_per_100_words=_rate_per_100_words(marker_count, reliable_words),
         median_pause_sec=median_pause,
         long_pauses=long_pauses,
+        discourse_marker_breakdown=breakdown,
     )
 
 
@@ -205,20 +285,26 @@ def warn_if_unreliable(metrics: FluencyMetrics) -> str | None:
     Returns a warning when so much of the transcript is low-confidence that the
     session isn't comparable with the others — or None when it's fine.
 
-    This is the check that would have caught 2026-08-06 at the time: 60% of
-    lines marked [?], against 24-30% in the sessions before it. Without it, the
-    resulting drop in every word-based number reads as the speaker getting
-    worse instead of the audio getting worse.
+    Fires on the WORD share, not the line share. Fired on lines, this check
+    would have gone off for 2026-08-06 and 2026-08-08 (60% and 57%) and put
+    "fix your recording setup" at the top of the coaching priorities — where it
+    duly ended up. But those sessions lost 23% and 15% of their words: what the
+    line count was really reporting is that this speaker says "Yeah." a lot, and
+    that whisper is least sure of itself on two-word utterances. Warning on that
+    spends the owner's top priority on the microphone instead of on their
+    English. See the module docstring for the full numbers.
     """
-    if metrics.total_lines == 0 or metrics.low_confidence_share < LOW_CONFIDENCE_WARN_SHARE:
+    if metrics.total_words == 0 or metrics.low_confidence_word_share < LOW_CONFIDENCE_WARN_SHARE:
         return None
+    lost_words = metrics.total_words - metrics.reliable_words
     return (
-        f"{metrics.low_confidence_share:.0%} of your lines ({metrics.low_confidence_lines} of "
-        f"{metrics.total_lines}) were recognized with low confidence. That's a recording-quality "
-        f"signal, not a speaking one: the grammar analysis skips those lines entirely, and the "
-        f"numbers here rest on the {metrics.reliable_words} words that remain — so don't compare "
-        f"them against sessions with cleaner audio. Check the mic, the distance and the "
-        f"background noise before reading anything into this session's fluency."
+        f"{metrics.low_confidence_word_share:.0%} of your words ({lost_words} of "
+        f"{metrics.total_words}, spread over {metrics.low_confidence_lines} of "
+        f"{metrics.total_lines} lines) were recognized with low confidence. That's a "
+        f"recording-quality signal, not a speaking one: the grammar analysis skips those lines "
+        f"entirely, and the numbers here rest on the {metrics.reliable_words} words that remain — "
+        f"so don't compare them against sessions with cleaner audio. Check the mic, the distance "
+        f"and the background noise before reading anything into this session's fluency."
     )
 
 
@@ -242,6 +328,7 @@ def metrics_from_annotated_text(text: str) -> FluencyMetrics:
     """
     total_lines = low_confidence_lines = 0
     total_words = reliable_words = filler_count = 0
+    per_line_markers: list[dict[str, int]] = []
 
     for raw in text.splitlines():
         match = _ANNOTATED_LINE.match(raw.strip())
@@ -256,19 +343,30 @@ def metrics_from_annotated_text(text: str) -> FluencyMetrics:
         else:
             reliable_words += words
             filler_count += count_fillers(line_text)
+            per_line_markers.append(discourse.count_markers(line_text))
+
+    breakdown = discourse.merge_counts(per_line_markers)
+    marker_count = sum(breakdown.values())
 
     return FluencyMetrics(
         total_lines=total_lines,
         low_confidence_lines=low_confidence_lines,
         low_confidence_share=round(low_confidence_lines / total_lines, 3) if total_lines else 0.0,
+        low_confidence_word_share=_word_share(total_words, reliable_words),
         total_words=total_words,
         reliable_words=reliable_words,
         speech_minutes=0.0,
         words_per_minute=0.0,
+        # No timing survives in the annotated format, so there's no rate to
+        # attach a basis to.
+        speech_time_basis="",
         filler_count=filler_count,
         fillers_per_100_words=_rate_per_100_words(filler_count, reliable_words),
+        discourse_marker_count=marker_count,
+        discourse_markers_per_100_words=_rate_per_100_words(marker_count, reliable_words),
         median_pause_sec=None,
         long_pauses=None,
+        discourse_marker_breakdown=breakdown,
     )
 
 
@@ -290,8 +388,59 @@ def _history_row(
     }
     # None becomes an empty cell, never 0 — "not measured" and "measured as
     # zero" must stay distinguishable to whoever reads the trend later.
-    row.update({k: ("" if v is None else v) for k, v in asdict(metrics).items()})
+    row.update({
+        k: ("" if v is None else v)
+        for k, v in asdict(metrics).items() if k != _BREAKDOWN_FIELD
+    })
     return row
+
+
+def _align_history_header(history_path: Path) -> None:
+    """
+    Brings an existing history file up to the current HISTORY_COLUMNS.
+
+    Adding a measurement adds a column, and a file written under the old header
+    would then get rows longer than its own header — every column after the
+    insertion point silently shifted by one for anyone reading it back. So the
+    header (and only the header) is rewritten, with empty cells filled in for
+    the sessions that predate the new columns. Empty is the correct value there:
+    those measurements genuinely weren't taken, and `_history_row` already uses
+    the same convention for anything unmeasured.
+
+    Refuses rather than drops if the file has a column this version doesn't know
+    about — that would be deleting recorded measurements to make a schema fit,
+    and this file is append-only precisely so that can't happen.
+    """
+    if not history_path.exists():
+        return
+
+    with history_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        existing = list(reader.fieldnames or [])
+        rows = list(reader)
+
+    if existing == HISTORY_COLUMNS:
+        return
+
+    unknown = [c for c in existing if c not in HISTORY_COLUMNS]
+    if unknown:
+        raise RuntimeError(
+            f"{history_path} has column(s) this version doesn't know about: {unknown}. "
+            "Refusing to rewrite the header, because that would drop them. Either restore "
+            "the version of voxlib that wrote them, or move the file aside deliberately."
+        )
+
+    with history_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=HISTORY_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({c: row.get(c, "") for c in HISTORY_COLUMNS})
+
+    added = [c for c in HISTORY_COLUMNS if c not in existing]
+    logger.info(
+        "Extended %s with new column(s) %s; the %d existing row(s) keep empty cells there "
+        "(those measurements were never taken).", history_path, added, len(rows),
+    )
 
 
 def append_history(
@@ -322,6 +471,7 @@ def append_history(
 
     history_path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not history_path.exists()
+    _align_history_header(history_path)
     with history_path.open("a", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=HISTORY_COLUMNS)
         if is_new:
@@ -344,17 +494,30 @@ def write_json(path: Path, metrics: FluencyMetrics, *, mode: str, files: int) ->
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _top_markers(breakdown: dict, limit: int = 3) -> str:
+    ranked = sorted(breakdown.items(), key=lambda item: -item[1])[:limit]
+    return ", ".join(f'"{name}" {count}x' for name, count in ranked)
+
+
 def describe(metrics: FluencyMetrics) -> str:
     """One line for the log and the console summary."""
-    parts = [f"{metrics.words_per_minute:.0f} words/min"]
+    basis = f" ({metrics.speech_time_basis} basis)" if metrics.speech_time_basis else ""
+    parts = [f"{metrics.words_per_minute:.0f} words/min{basis}"]
     if metrics.fillers_per_100_words is None:
         parts.append("fillers not measurable (--remove-fillers stripped them)")
     else:
         parts.append(f"{metrics.fillers_per_100_words:.2f} fillers per 100 words "
                      f"({metrics.filler_count} total)")
+    markers = f"{metrics.discourse_markers_per_100_words:.2f} discourse markers per 100 words"
+    if metrics.discourse_marker_breakdown:
+        markers += f" ({_top_markers(metrics.discourse_marker_breakdown)})"
+    parts.append(markers)
     if metrics.median_pause_sec is not None:
         parts.append(f"median pause {metrics.median_pause_sec:.2f}s, "
                      f"{metrics.long_pauses} over {LONG_PAUSE_SEC:.0f}s")
-    # Last, but always present: it's the caveat on everything before it.
-    parts.append(f"{metrics.low_confidence_share:.0%} of lines low-confidence")
+    # Last, but always present: it's the caveat on everything before it. Both
+    # shares, because the gap between them is itself the finding — see the
+    # module docstring.
+    parts.append(f"{metrics.low_confidence_word_share:.0%} of words low-confidence "
+                 f"({metrics.low_confidence_share:.0%} of lines)")
     return "; ".join(parts)
