@@ -117,13 +117,125 @@ def test_impact_lets_a_severe_rare_mistake_outrank_a_mild_frequent_one(tmp_path:
     """
     path = tmp_path / "mistakes.csv"
     _record(path, "2026-08-08", 1000, [
-        ("Article Errors", 1, 10),        # impact 1 x 10.0 = 10
-        ("Verb Agreement", 5, 4),         # impact 5 x  4.0 = 20
+        ("Article Errors", 1, 10),        # impact 1 x sqrt(10.0) = 3.16
+        ("Verb Agreement", 5, 4),         # impact 5 x sqrt( 4.0) = 10.0
     ])
 
     ranked = [t.category for t in mistakes.summarize(mistakes.load(path))]
 
     assert ranked == ["Verb Agreement", "Article Errors"]
+
+
+def test_severity_still_decides_when_the_frequency_gap_is_the_real_one(tmp_path: Path):
+    """
+    The failure the square root exists to fix, in the shape it actually took.
+    These are the real 2026-08-09 numbers: severity spans a factor of two across
+    every tracked category while the rate spans a factor of thirty, so under a
+    raw severity x rate product the rate decides everything and severity is
+    decorative. Conditional "will" carried the highest severity on record and
+    ranked twelfth of fourteen.
+
+    Damped, a three-point severity gap survives a seven-fold frequency gap. The
+    frequent one is still ranked first here — it should be, it is seven times as
+    common — but by a margin that leaves room for the rest of the table.
+    """
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-09", 1000, [
+        ("Article Errors", 2, 7),         # frequent, understood every time
+        ("Conditional will", 5, 1),       # rare, changes what the listener hears
+    ])
+
+    by_name = {t.category: t for t in mistakes.summarize(mistakes.load(path))}
+
+    assert by_name["Conditional will"].impact > by_name["Article Errors"].impact / 2
+    # Under the old raw product this was 14.0 against 5.0 — a 2.8x gap on a pair
+    # the owner should be splitting attention between.
+    assert by_name["Article Errors"].impact / by_name["Conditional will"].impact < 1.5
+
+
+def test_categories_split_into_a_clarity_tier_and_a_polish_tier(tmp_path: Path):
+    """Rule 17 builds the action plan out of both buckets, so the bucket has to
+    be readable off the trend rather than re-derived from severity by eye."""
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-09", 1000, [
+        ("Verb Complementation", 4, 1),
+        ("Third-Person -s", 3, 1),
+        ("Article Errors", 2, 7),
+        ("Redundant Subject Pronoun", 1, 2),
+    ])
+
+    tiers = {t.category: t.tier for t in mistakes.summarize(mistakes.load(path))}
+
+    assert tiers == {
+        "Verb Complementation": "clarity",
+        "Third-Person -s": "clarity",
+        "Article Errors": "polish",
+        "Redundant Subject Pronoun": "polish",
+    }
+
+
+def test_a_priority_that_has_been_drilled_for_three_sessions_without_moving_is_flagged(
+    tmp_path: Path,
+):
+    """
+    Articles were goal #1 five sessions running while the rate climbed 2.32 ->
+    6.77, and nothing in the numbers ever said so. The ranking has no memory of
+    having been acted on; this flag is that memory.
+    """
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-06", 1000, [("Article Errors", 2, 2)])
+    _record(path, "2026-08-08", 1000, [("Article Errors", 2, 7)])
+    _record(path, "2026-08-09", 1000, [("Article Errors", 2, 7)])
+
+    assert mistakes.summarize(mistakes.load(path))[0].stalled
+
+
+def test_a_quarter_drop_over_the_window_counts_as_movement(tmp_path: Path):
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-06", 1000, [("Article Errors", 2, 8)])
+    _record(path, "2026-08-08", 1000, [("Article Errors", 2, 7)])
+    _record(path, "2026-08-09", 1000, [("Article Errors", 2, 5)])
+
+    assert not mistakes.summarize(mistakes.load(path))[0].stalled
+
+
+def test_a_mistake_returning_after_clean_sessions_is_a_regression_not_a_stall(tmp_path: Path):
+    """
+    Third-person "-s" went clean, clean, then four instances. That needs the
+    regression handling in step 3, not "the drill isn't working" — it had no
+    drill to fail. Conflating the two flagged six of fourteen categories, which
+    is the same as flagging none.
+    """
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-06", 1000, [("Third-Person -s", 3, 0)])
+    _record(path, "2026-08-08", 1000, [("Third-Person -s", 3, 0)])
+    _record(path, "2026-08-09", 1000, [("Third-Person -s", 3, 4)])
+
+    trend = mistakes.summarize(mistakes.load(path))[0]
+    assert not trend.stalled
+    assert trend.direction == "worsening"
+
+
+def test_two_sessions_are_not_enough_to_call_something_stalled(tmp_path: Path):
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-08", 1000, [("Article Errors", 2, 7)])
+    _record(path, "2026-08-09", 1000, [("Article Errors", 2, 7)])
+
+    assert not mistakes.summarize(mistakes.load(path))[0].stalled
+
+
+def test_an_untested_session_does_not_make_a_category_look_stalled(tmp_path: Path):
+    """A session where the structure never came up says nothing about whether
+    the drill is working, so it mustn't sit inside the stall window."""
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-04", 1000, [("Conditional will", 4, 4)])
+    _record(path, "2026-08-06", 1000, [("Conditional will", 4, None)])
+    _record(path, "2026-08-08", 1000, [("Conditional will", 4, None)])
+    _record(path, "2026-08-09", 1000, [("Conditional will", 4, 1)])
+
+    trend = mistakes.summarize(mistakes.load(path))[0]
+    assert trend.sessions_measured == 2
+    assert not trend.stalled          # only two measured sessions, not three
 
 
 def test_recent_sessions_weigh_more_than_older_ones(tmp_path: Path):
@@ -190,6 +302,18 @@ def test_the_table_flags_what_is_ready_to_move_to_improvements(tmp_path: Path):
 
     assert "move to Improvements" in table
     assert "Solved Thing" in table
+
+
+def test_the_table_shows_the_tier_and_names_what_has_stopped_moving(tmp_path: Path):
+    path = tmp_path / "mistakes.csv"
+    for date, count in (("2026-08-06", 2), ("2026-08-08", 7), ("2026-08-09", 7)):
+        _record(path, date, 1000, [("Article Errors", 2, count), ("Verb Agreement", 4, 1)])
+
+    table = mistakes.format_table(mistakes.summarize(mistakes.load(path)))
+
+    assert "clarity" in table and "polish" in table
+    assert "change the drill" in table
+    assert "Article Errors" in table.split("change the drill")[1]
 
 
 def test_empty_history_says_so_instead_of_crashing(tmp_path: Path):

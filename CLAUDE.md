@@ -103,12 +103,13 @@ their rules together in one response.
 15. **Rank mistakes by impact, not raw frequency.** Wherever mistakes get
     ranked for attention — `Current Priorities` in `memory.md` (step 6b) and
     focus selection in Conversation Practice Mode (P15) — use
-    `impact = severity × occurrence rate`, not occurrence count alone. A
+    `impact = severity × √(occurrence rate)`, not occurrence count alone. A
     high-frequency but low-severity error (e.g. a missing article) should
     not automatically outrank a lower-frequency error that actually breaks
-    communication (e.g. wrong verb agreement) — severity is the multiplier
-    that keeps priority weighted toward what hurts intelligibility, per
-    rule 5. When comparing across sessions, weight recent sessions' occurrences
+    communication (e.g. a preposition that shifts the meaning, or a recipient
+    the listener has to reassign) — severity is the multiplier that keeps
+    priority weighted toward what hurts intelligibility, per rule 5, and
+    rule 16 is what "severity" means here. When comparing across sessions, weight recent sessions' occurrences
     more than older ones so a mistake that's fading doesn't keep outranking
     one that's actively getting worse.
 
@@ -117,6 +118,94 @@ their rules together in one response.
     count per 1,000 reliable words first, which matters because sessions
     differ in length by up to 40%, and it applies the recency weighting
     consistently instead of however it felt this time.
+
+    The square root on the rate is not decoration, and it is there because the
+    first version of this rule failed in exactly the way the rule warns
+    against. Severity is a 1-5 judgment; in practice every tracked category
+    landed between 2 and 4, a spread of two. Rates per 1,000 words spanned
+    0.21 to 6.00, a spread of twenty-nine. Multiplied raw, the rate decided
+    everything and severity moved nothing: conditional "will" — severity 4,
+    the highest on record — ranked twelfth of fourteen, while articles held
+    priority #1 for five sessions with their rate *rising*. Damping the rate
+    lets a real severity gap survive a moderate frequency gap, which is what
+    this rule was always asking for.
+
+16. **Severity is what the listener loses, not how ugly the grammar is.**
+    One scale, used identically in the session report's mistake table
+    (step 5), in `mistakes.csv` (step 6) and in `memory.md`:
+
+    | | The listener… |
+    |---|---|
+    | **5** | …understands something *different*, or has to ask you to repeat |
+    | **4** | …recovers the meaning from context, but with a visible beat of effort — who did what to whom, when it happened, whether it's negated, whether it's a question |
+    | **3** | …understands instantly, but the error is in the sentence's **skeleton** — agreement, auxiliaries, tense, verb form. Reads as *learner* English |
+    | **2** | …understands instantly; the error is in the **trim** — an article, adverb order, an extra pronoun, a connector. Reads as *accented* English |
+    | **1** | …would most likely not notice. Stylistic. |
+
+    Ask the questions in that order: *does the listener lose anything?* first;
+    only if the answer is no does the skeleton/trim distinction decide between
+    3 and 2.
+
+    Judge the *instance*, not how often it happens — frequency is already the
+    other half of rule 15, and letting it in here counts it twice. That is why
+    level 3 says nothing about recurrence, and why a missing article stays a
+    **2** however many times it appears: no listener has ever misheard "I am
+    open-minded person". A mangled recipient ("AI can explain you everything",
+    "it proposes me improving exercises") is a **4** at one instance a session,
+    because the argument structure has to be rebuilt before the sentence lands.
+
+    Two consequences worth stating, because both are counterintuitive and both
+    are correct: a high-frequency error can be low severity and still rank
+    first — that's fine, it earned it on frequency. And conditional "will" in
+    if-clauses is a **3**, not the 4 it carried for five sessions as "the
+    highest severity of anything tracked": the tense is wrong in the skeleton,
+    but "if AI will make a mistake" is understood by every listener alive.
+    Rate the consequence, not the textbook.
+
+    Keep a category's severity stable across sessions (rule 13's logic applied
+    to numbers), and re-rate only if this session shows the error doing
+    something new to comprehension — as when third-person "-s" started running
+    in both directions and began obscuring subject number.
+
+17. **The action plan is a portfolio, not a top-5 of one number.** Impact is a
+    good ranking; it is a bad *slate*, because one very frequent survivable
+    error will legitimately own several of the top slots and crowd out
+    everything the owner actually gets misunderstood on. So for the max-5
+    action plan (step 5) and for `Current Priorities` (step 6b):
+
+    - **At least 2** items from the `clarity` tier (severity 3+ — read the
+      `Tier` column of `python -m voxlib.mistakes`).
+    - **At most 2** items from the `polish` tier (severity ≤ 2), however high
+      their impact.
+    - **One slot is reserved for fluency or vocabulary** — the
+      discourse-marker rate, the filler rate, speaking rate, or a
+      `Vocabulary To Replace` item. These are not in `mistakes.csv` and have
+      no impact score, so they lose every ranked comparison against grammar by
+      default and then never get worked on. At this level they are frequently
+      the biggest real obstacle: "you know" ran 105 times in 2,364 words on
+      2026-08-09, more than seven times the article rate.
+
+    Rank within those constraints by impact. If a tier genuinely has nothing
+    in it this session, say so and leave the slot empty rather than padding it.
+
+18. **A stalled priority needs a different drill, not a louder one.**
+    `python -m voxlib.mistakes` marks a category with `!` when it has been
+    measured across three sessions and is no better at the end of them —
+    articles went 2.36 → 6.65 → 6.77 per 1,000 words while sitting at goal #1
+    the entire time, and nothing in the process ever noticed.
+
+    If a `!` category is in the current priorities, the report may **not**
+    restate the previous session's goal. Say plainly that the approach hasn't
+    worked, then change something concrete: narrow it to one frame instead of
+    the whole category (articles after "it's / is / am" rather than articles),
+    switch from recognition to production, hand it to Conversation Practice
+    Mode, or drop it down the list for a session and let something movable
+    take the slot. A goal repeated verbatim for a third time is a sign the
+    system is describing the problem instead of acting on it.
+
+    A mistake that was clean and came back is **not** stalled — that's a
+    regression, handled in step 3, and it doesn't carry the "the drill failed"
+    reading because there was no drill to fail.
 
 # Workflow: when asked to analyze a new recording
 
@@ -281,9 +370,11 @@ naturalness, sentence variety, confidence (if inferable). Then: the 3 biggest
 things currently limiting their English.
 
 **Most important mistakes** — table: `My sentence | Better version | Why |
-Severity (1-5)`. Only meaningful mistakes, max 20 rows. Keep severity ratings
-consistent with how the same mistake type was rated in previous sessions
-unless it's genuinely changed.
+Severity (1-5)`. Only meaningful mistakes, max 20 rows. **Severity is the
+listener-consequence scale in rule 16** — what the listener loses on that
+instance, not how often it happens and not how badly it breaks a textbook
+rule. Keep the rating consistent with how the same mistake type was rated in
+previous sessions unless it's genuinely changed.
 
 **Natural English** — sentences that are grammatically correct but
 unnatural: what they said / what a native speaker would probably say / why.
@@ -303,6 +394,11 @@ know" 88× is a different instruction from 88 markers spread over a dozen
 phrases.
 
 **Action plan** — max 5 ranked priorities, each with a one-line "why."
+Built as a portfolio, not a top-5 of the impact column: **at least 2 clarity-
+tier items, at most 2 polish-tier items, and one slot reserved for fluency or
+vocabulary** (rule 17). If any priority is marked `!` (stalled) in
+`python -m voxlib.mistakes`, rule 18 applies — change the drill, don't repeat
+last session's goal.
 
 **Targeted practice** — generated ONLY from mistakes actually found this
 session: 3 fill-in-the-blank, 3 sentence-correction, 3 translation, 3
@@ -337,7 +433,10 @@ python -m voxlib.mistakes add --date YYYY-MM-DD --reliable-words <N> \
   `analysis/fluency_history.csv` (step 4). Don't recount it.
 - Category names must match the `## <Mistake Name>` headings in `memory.md`
   exactly (rule 13) — that string is the join key between the two files.
-- Severity is the same rating used in the session report's mistake table.
+- Severity is the same rating used in the session report's mistake table —
+  the listener-consequence scale in rule 16. The code ranks by the *most
+  recent* severity on record for a category, so a re-rating takes effect
+  across the whole trend as soon as it's written.
 - **An empty occurrences field means "no opportunity to appear", not "clean".**
   Use it when the structure never came up: 2026-08-08 produced zero if-clauses,
   so "conditional will" was untested that session, not fixed. A `0` means it
@@ -353,11 +452,20 @@ python -m voxlib.mistakes            # ranked table
 python -m voxlib.mistakes show --category "Article Errors"
 ```
 
-The `Impact` column is rule 15 carried out arithmetically (severity ×
+The `Impact` column is rule 15 carried out arithmetically (severity × √of the
 recency-weighted rate per 1,000 reliable words), so **rank "Current
 Priorities" by that column rather than re-deriving a ranking by eye.** Rates
 are normalized per 1,000 reliable words because sessions differ in length —
 5 errors in 2,154 words and 13 in 1,956 are not comparable as raw counts.
+
+Two other columns are instructions, not decoration:
+
+- **`Tier`** — `clarity` (severity 3+) or `polish` (severity ≤ 2). Rule 17's
+  action plan is built out of both, so read it before writing the plan rather
+  than ranking straight down the impact column.
+- **`!` next to the trend** — this category has been measured across three
+  sessions and hasn't come down. Rule 18: if it's a current priority, the
+  approach changes this session.
 
 ## 6b. Update `analysis/memory.md`
 
@@ -401,7 +509,10 @@ adding/updating/moving entries):
 - Append one row to "Conversation History."
 - Update "Current Priorities" and "Focus For Next Recording" based on this
   session's action plan — rank "Current Priorities" by the `Impact` column
-  from step 6 (rule 15), not by raw occurrence count alone.
+  from step 6 (rule 15), not by raw occurrence count alone, and subject to
+  the tier quotas in rule 17 so the list stays a portfolio rather than a
+  ranking of one number. Any `!` entry carried over from last session must
+  come with a changed approach (rule 18), not a repeated goal.
 
 ## 7. Append to `analysis/scores_history.csv`
 
@@ -443,10 +554,11 @@ Always teach through dialogue, not lists of exercises.
 
 ## Rules
 
-Numbered `P1`–`P18` on purpose, so they never collide with "General rules"
-`1`–`15` above when both are visible in the same file — the two rule sets
-are never mixed (see "Modes in this repo"), but the numbers must stay
-unambiguous even in a long context.
+Numbered `P1`–`P18` on purpose. The `P` is what carries the distinction, not
+the number: "General rules" now also run `1`–`18` above, so a bare "rule 17"
+would be ambiguous and every reference in this file must keep its prefix. The
+two rule sets are never mixed (see "Modes in this repo"), but the numbers must
+stay unambiguous even in a long context.
 
 P1. Ask only ONE question at a time.
 P2. Wait for the answer before continuing.
@@ -543,7 +655,13 @@ P15. Pick ONE focus grammar pattern for the session:
      - If several candidates are equally due (tied `Next due` dates, or
        several with no row yet), break the tie by impact (rule 15) — read the
        `Impact` column of `python -m voxlib.mistakes`, not plain severity or
-       raw frequency. This mode never writes to `mistakes.csv`, only reads it,
+       raw frequency. Where impact is close, prefer the `clarity` tier: a
+       typed dialogue is the one place a meaning-breaking pattern can be
+       caught mid-sentence, whereas a polish-tier habit is better served by
+       volume of speech. A pattern marked `!` (stalled in live speech, rule
+       18) is a strong candidate regardless of its `Next due` — that is
+       precisely the case where drilling it here instead is the changed
+       approach. This mode never writes to `mistakes.csv`, only reads it,
        the same way it treats `memory.md`.
      - Always track and log the pattern under its exact `## <Mistake
        Name>` heading from `memory.md` — never the free-text priority
