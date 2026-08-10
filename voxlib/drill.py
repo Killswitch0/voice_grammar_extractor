@@ -76,7 +76,13 @@ HISTORY_COLUMNS = [
 # can answer "which item keeps failing", which is usually the actual lesson.
 ITEM_COLUMNS = ["date", "drill", "mode", "item_id", "prompt", "attempted", "correct", "seconds"]
 
+# Spoken, typed, and the answer sheet read aloud. Three different questions, so
+# three different series: a typed answer is produced with time to think and no
+# recogniser in the way, which makes it reliably easier than the same item
+# spoken. Averaging the two would let a week of typing look like progress in
+# speech, which is the failure this whole project keeps having to design around.
 DRILL_MODE = "drill"
+TYPED_MODE = "typed"
 CALIBRATION_MODE = "calibration"
 
 # Punctuation is the transcriber's guess, not the speaker's, so it can't be
@@ -488,6 +494,11 @@ def load_item_history(path: Path) -> list[ItemRow]:
 # roughly two minutes spoken, which is the length that still gets done.
 DEFAULT_SAMPLE = 15
 
+# What a typed practice session opens with. Small on purpose: the drill block is
+# a warm-up that puts the session's focus pattern in front of the speaker, and
+# the value of the session is the conversation after it, not the block.
+DEFAULT_TYPED_ITEMS = 5
+
 
 def select_items(drill: Drill, item_rows: list[ItemRow], sample: int) -> list[DrillItem]:
     """
@@ -506,18 +517,27 @@ def select_items(drill: Drill, item_rows: list[ItemRow], sample: int) -> list[Dr
     day incomparable for no benefit, and the rotation already comes from the
     history moving under it.
 
-    Calibration runs are ignored here: reading the answer sheet aloud says
-    nothing about which items the speaker finds hard, and letting a clean
-    calibration mark an item as mastered would retire exactly the items that are
-    hardest to say.
+    Which rows count, and why the rule is deliberately asymmetric:
+
+    - Spoken runs count both ways. That is the measurement.
+    - Typed runs count only when they *miss*. Getting an item wrong with time to
+      think and no recogniser in the way is strong evidence it isn't known;
+      getting it right under those conditions is weak evidence that it is, and
+      treating it as mastery would retire items from the spoken drill on the
+      strength of the easier test.
+    - Calibration runs never count. Reading the answer sheet aloud says nothing
+      about which items are hard, and a clean calibration would retire exactly
+      the items that are hardest to say.
     """
     if sample >= drill.size:
         return list(drill.items)
 
     last_by_item: dict[str, ItemRow] = {}
-    for row in item_rows:
-        if row.drill == drill.name and row.mode == DRILL_MODE:
-            last_by_item[row.item_id] = row          # rows are date-sorted; last wins
+    for row in item_rows:                            # rows are date-sorted; last wins
+        if row.drill != drill.name:
+            continue
+        if row.mode == DRILL_MODE or (row.mode == TYPED_MODE and not row.correct):
+            last_by_item[row.item_id] = row
 
     def rank(indexed: tuple[int, DrillItem]) -> tuple[int, str, int]:
         index, item = indexed
@@ -571,6 +591,8 @@ def format_result(result: DrillResult) -> str:
     lines = [f"{result.drill.name} — {result.drill.target}"]
     if result.mode == CALIBRATION_MODE:
         lines.append("CALIBRATION RUN — anything wrong below is the instrument, not you.")
+    if result.mode == TYPED_MODE:
+        lines.append("TYPED RUN — recorded separately from spoken ones.")
     lines.append("")
 
     for i, r in enumerate(result.items, 1):
@@ -607,6 +629,10 @@ def format_result(result: DrillResult) -> str:
         lines.append("")
         lines.append("These misses are the drill's own error rate. Treat that many misses "
                      "in a real run as noise rather than as mistakes.")
+    if result.mode == TYPED_MODE:
+        lines.append("Typing gives time to think and no recogniser to fight, so this will "
+                     "read higher than the same items spoken. Don't compare it with a "
+                     "spoken score — a miss here is the useful signal.")
     return "\n".join(lines)
 
 
@@ -625,8 +651,15 @@ def format_history(rows: list[HistoryRow]) -> str:
                      f"{accuracy:>5} {pace:>7} {r.fingerprint or '—':>8} {r.mode:>12}")
         seen_fingerprints.setdefault(r.drill, set()).add(r.fingerprint)
 
+    modes = {r.drill: {row.mode for row in rows if row.drill == r.drill} for r in rows}
+    mixed = [name for name, seen in modes.items()
+             if {DRILL_MODE, TYPED_MODE} <= seen]
     changed = [name for name, prints in seen_fingerprints.items() if len(prints) > 1]
     lines.append("")
+    if mixed:
+        lines.append(f"Both typed and spoken runs on record for: {', '.join(mixed)} — read "
+                     f"them as two series. Typed runs higher by construction; the spoken "
+                     f"one is the measurement.")
     if changed:
         lines.append(f"Item set changed at some point for: {', '.join(changed)} — scores "
                      f"either side of a new fingerprint are different measurements, so "
@@ -669,8 +702,15 @@ def main(argv: list[str] | None = None) -> int:
     show.add_argument("--answers", action="store_true",
                       help="Reveal the model answers (read these AFTER speaking, not before)")
 
+    nxt = sub.add_parser("next", help="The prompts to lead a typed practice session with")
+    nxt.add_argument("drill")
+    nxt.add_argument("--count", type=int, default=DEFAULT_TYPED_ITEMS)
+
     score_cmd = sub.add_parser("score", help="Score a transcript against a drill")
     score_cmd.add_argument("drill")
+    score_cmd.add_argument("--typed", action="store_true",
+                           help="These answers were typed, not spoken — record them as a "
+                                "separate series, since typing is the easier test")
     score_cmd.add_argument("--transcript", type=Path,
                            default=_repo_root() / "output" / "lines.json",
                            help="lines.json (preferred — carries confidence and timings) "
@@ -690,7 +730,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    if args.command in {"show", "score", "items"}:
+    if args.command in {"show", "next", "score", "items"}:
         drills = {d.name: d for d in load_all(args.drills_dir)}
         drill = drills.get(args.drill)
         if drill is None:
@@ -734,6 +774,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"This selection is saved; `score {drill.name}` will use it.")
         return 0
 
+    if args.command == "next":
+        chosen = select_items(drill, load_item_history(args.item_history), args.count)
+        write_pending(args.pending, drill, [i.item_id for i in chosen])
+        print(f"{drill.name} — {drill.target}")
+        print(f"{len(chosen)} items, hardest first. Ask them one at a time.")
+        print()
+        for i, item in enumerate(chosen, 1):
+            print(f"{i:>2}. {item.prompt}")
+        print()
+        print("Answers are deliberately not printed: this output is visible to the "
+              "person answering.")
+        print(f"Afterwards: score {drill.name} --typed --transcript <their answers, one "
+              f"per line>")
+        return 0
+
     if args.command == "items":
         rows = [r for r in load_item_history(args.item_history)
                 if r.drill == drill.name and r.mode == DRILL_MODE]
@@ -760,7 +815,9 @@ def main(argv: list[str] | None = None) -> int:
         if not args.transcript.exists():
             parser.error(f"No transcript at {args.transcript}. Run the pipeline first.")
         lines = load_spoken_lines(args.transcript)
-        if args.transcript.suffix != ".json":
+        if args.transcript.suffix != ".json" and not args.typed:
+            # Not a warning for typed answers: there was no recogniser to be
+            # unsure of them, and no timings to lose.
             print("Scoring a plain transcript: no confidence flags and no timings, so a "
                   "word the recogniser guessed can be scored as your mistake. Prefer "
                   "output/lines.json.")
@@ -769,8 +826,13 @@ def main(argv: list[str] | None = None) -> int:
         pending = read_pending(args.pending, drill.name)
         running = drill.subset(pending) if pending and not args.whole_drill else drill
 
-        result = score(running, lines,
-                       mode=CALIBRATION_MODE if args.calibrate else DRILL_MODE)
+        if args.calibrate:
+            mode = CALIBRATION_MODE
+        elif args.typed:
+            mode = TYPED_MODE
+        else:
+            mode = DRILL_MODE
+        result = score(running, lines, mode=mode)
         print(format_result(result))
 
         if not args.dry_run:

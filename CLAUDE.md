@@ -439,10 +439,14 @@ Four columns are instructions rather than decoration:
 - **`Set`** — the fingerprint of the item pool. If it changed between two rows,
   the drill was edited, and the scores either side are different measurements —
   say so instead of drawing one trend through both.
-- **`Mode`** — `calibration` rows are the answers read aloud deliberately
-  correctly, so their misses are the instrument's error rate, not the speaker's.
-  Never mix them into an accuracy trend; use them to say how many misses in a
-  real run are noise.
+- **`Mode`** — three separate series, never one. `drill` is spoken and is the
+  measurement. `typed` rows come from Conversation Practice Mode (P19) and run
+  higher by construction — time to think, no recogniser — so reading them as
+  progress in speech is exactly the mistake this column exists to prevent; what
+  they are good for is a *miss*, which is strong evidence the item isn't known.
+  `calibration` rows are the answers read aloud deliberately correctly, so their
+  misses are the instrument's error rate, not the speaker's — use them to say
+  how many misses in a real run are noise.
 - **unscorable lines** — lines excluded because the recogniser wasn't sure of
   them. A drill where many lines were excluded is a recording problem, not a
   result, the same way a high low-confidence word share is in step 4.
@@ -693,7 +697,7 @@ Always teach through dialogue, not lists of exercises.
 
 ## Rules
 
-Numbered `P1`–`P18` on purpose. The `P` is what carries the distinction, not
+Numbered `P1`–`P20` on purpose. The `P` is what carries the distinction, not
 the number: "General rules" now also run `1`–`20` above, so a bare "rule 17"
 would be ambiguous and every reference in this file must keep its prefix. The
 two rule sets are never mixed (see "Modes in this repo"), but the numbers must
@@ -770,10 +774,11 @@ At the start of every practice session, before the first question:
 P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
      Priorities`, `Persistent Grammar Mistakes`, `Focus For Next
      Recording`, `Vocabulary To Replace`, `Useful Vocabulary Learned`) and
-     `analysis/conversation_focus_log.md` (see structure above). If either
-     is missing or unreadable, say nothing and fall back to normal topic
-     selection (P10) and a B1+ starting difficulty (P8) — never block on
-     this.
+     `analysis/conversation_focus_log.md` (see structure above), and run
+     `python -m voxlib.drill list` to see which categories have a drill. If
+     any of these is missing or unreadable, say nothing and fall back to
+     normal topic selection (P10) and a B1+ starting difficulty (P8) —
+     never block on this.
 P15. Pick ONE focus grammar pattern for the session:
      - If `Persistent Grammar Mistakes` has no entries yet (common in the
        first few sessions — a mistake only becomes "persistent" after
@@ -811,6 +816,8 @@ P15. Pick ONE focus grammar pattern for the session:
        Occasionally (not every session), also work in one item from
        `Useful Vocabulary Learned` to check retention — no tracking
        needed, use judgment.
+     - If the chosen category has a drill, the session opens with it —
+       see P19.
 P16. If a grammar pattern was found via P15, state the session's focus in
      one short line as part of the first message, e.g. "Today's focus:
      article errors." This is a pointer, not theory — it doesn't violate
@@ -833,6 +840,54 @@ P18. At the end of the session, update (or create)
        needs re-checking soon, not a longer gap.
      Skip this step if P15 fell back to normal topic selection — there's
      no formal pattern to log.
+
+     A miss in the P19 drill block counts as "produced an error this
+     session" for the streak, the same as one made mid-conversation. It is
+     the same pattern failing, under an easier condition.
+
+P19. If the session's focus category has a drill (its `category:` matches the
+     `## <Mistake Name>` heading exactly), **open the session with it**:
+
+     ```bash
+     python -m voxlib.drill next "<drill-name>"        # 5 prompts, hardest first
+     ```
+
+     Ask them one at a time under P1–P6, exactly like any other question —
+     correction, one-line why, next prompt. Then move into normal
+     conversation for the rest of the session; the block is a warm-up that
+     puts the pattern in front of them, not the session.
+
+     The command prints prompts and deliberately withholds the model
+     answers, because its output is visible to the person answering. Correct
+     from your own knowledge of English, not from an answer key on screen.
+
+     At the end, write their answers to a scratch file, one per line in the
+     order asked, and record the attempt:
+
+     ```bash
+     python -m voxlib.drill score "<drill-name>" --typed --transcript <file>
+     ```
+
+     `--typed` is not optional. A typed answer is produced with time to think
+     and no recogniser in the way, which makes it reliably easier than the
+     same item spoken; recording it as an ordinary run would let a week of
+     typing read as progress in speech. The two are kept as separate series
+     and a typed hit never retires an item from the spoken drill — only a
+     typed *miss* counts, and it counts as a miss.
+
+     If the category has no drill, skip this entirely and run the session as
+     a normal conversation. Do not invent prompts and score them by hand:
+     an unscored improvised block is the fill-in-the-blank exercise this was
+     built to replace.
+P20. An item missed in a **spoken** drill must come back in conversation
+     in different words, never as the same sentence. Re-asking the sentence
+     verbatim trains the answer; the point is the frame, and the only proof
+     it transferred is producing it somewhere the wording is new. Take the
+     failing prompts from `python -m voxlib.drill items "<drill-name>"`,
+     then build ordinary questions that make that frame necessary — ask
+     what someone's job is rather than asking for "she / teacher" again.
+     Nothing to log for this: it is how the conversation is steered, not a
+     separate exercise.
 
 ## Goal
 

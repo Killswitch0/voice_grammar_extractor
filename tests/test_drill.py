@@ -334,6 +334,30 @@ def test_among_items_already_right_the_least_recent_comes_first():
     assert [i.prompt for i in drill.select_items(pool, history, 1)] == ["p1"]
 
 
+def test_a_typed_miss_brings_an_item_back_like_any_other_miss():
+    """Getting it wrong with time to think and no recogniser in the way is
+    strong evidence the item isn't known."""
+    pool = _pool(6)
+    history = [_row(pool, 3, date="2026-08-01", correct=False, mode=drill.TYPED_MODE)]
+
+    assert drill.select_items(pool, history, 1)[0].prompt == "p3"
+
+
+def test_a_typed_hit_does_not_retire_an_item_from_the_spoken_drill():
+    """
+    The asymmetry is the point. Typing is the easier test, so a hit there is
+    weak evidence of mastery — counting it would quietly remove items from the
+    spoken drill on the strength of a condition the speaker never faces in
+    conversation.
+    """
+    pool = _pool(3)
+    history = [_row(pool, 0, date="2026-08-09", correct=True, mode=drill.TYPED_MODE)]
+
+    # p0 is still treated as never attempted, so it stays ahead of nothing in
+    # particular — but crucially it is not sorted behind the unseen items.
+    assert drill.select_items(pool, history, 1)[0].prompt == "p0"
+
+
 def test_a_calibration_run_does_not_mark_items_as_mastered():
     """Reading the answer sheet aloud says nothing about which items are hard;
     letting it count would retire exactly the ones worth drilling."""
@@ -565,6 +589,51 @@ def test_the_items_view_shows_which_prompts_keep_failing(tmp_path: Path, capsys)
 
     assert "he / fanatic" in out
     assert "2026-08-10" in out
+
+
+def test_next_hands_practice_mode_the_prompts_without_the_answers(tmp_path: Path, capsys):
+    """This output is visible to the person answering, so printing the key would
+    turn the block into a reading exercise."""
+    exit_code = drill.main(_cli_paths(tmp_path) + ["next", "articles-linking-verb"])
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "he / fanatic" in out
+    assert "He's a fanatic." not in out
+    assert "--typed" in out
+
+
+def test_next_records_the_selection_so_the_typed_answers_can_be_scored(tmp_path: Path, capsys):
+    drill.main(_cli_paths(tmp_path) + ["next", "articles-linking-verb", "--count", "3"])
+    capsys.readouterr()
+
+    assert len(drill.read_pending(tmp_path / "pending.json", "articles-linking-verb")) == 3
+
+
+def test_a_typed_run_is_recorded_as_its_own_series(tmp_path: Path, capsys):
+    answers = tmp_path / "answers.txt"
+    answers.write_text("He's a fanatic.\n", encoding="utf-8")
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "articles-linking-verb", "--count", "1"])
+    capsys.readouterr()
+
+    drill.main(paths + ["score", "articles-linking-verb", "--typed",
+                        "--transcript", str(answers), "--date", "2026-08-10"])
+    out = capsys.readouterr().out
+
+    assert "TYPED RUN" in out
+    assert "no confidence flags" not in out, "there was no recogniser to warn about"
+    assert drill.load_history(tmp_path / "drills.csv")[0].mode == drill.TYPED_MODE
+
+
+def test_the_history_says_when_typed_and_spoken_runs_are_being_mixed():
+    def row(mode):
+        return drill.HistoryRow(date="2026-08-10", drill="d", category="c",
+                                fingerprint="aaa", mode=mode, items=5, attempted=5,
+                                correct=4, median_seconds=None, unscorable_lines=0, notes="")
+
+    assert "two series" in drill.format_history([row(drill.DRILL_MODE), row(drill.TYPED_MODE)])
+    assert "two series" not in drill.format_history([row(drill.DRILL_MODE)])
 
 
 def test_an_unknown_drill_name_lists_what_is_available(tmp_path: Path, capsys):
