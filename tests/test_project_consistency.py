@@ -106,18 +106,19 @@ def test_claude_md_tells_the_workflow_to_read_the_drill_history():
     assert "drills.csv" in text, "CLAUDE.md never tells the workflow to read drill results"
 
 
-def test_the_readme_documents_the_drill_commands_it_ships():
+def test_the_readme_tells_a_person_how_to_use_drills():
     """
     CLAUDE.md is instructions for the model and drills/README.txt is the file
-    format; neither tells a person how to use the feature. A subcommand that
-    exists and is documented nowhere a human reads is a subcommand nobody runs.
+    format; neither tells a person how to reach the feature. `next` and `score`
+    are deliberately absent here — those are run by the model inside a practice
+    session, and documenting them as user commands is how the workflow grew an
+    errand nobody wanted to perform.
     """
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
-    missing = [c for c in ("list", "show", "score", "items")
-               if f"python -m voxlib.drill {c}" not in readme]
-    assert not missing, f"README.md documents no `drill {missing}`"
-    assert "--calibrate" in readme, "README.md never mentions calibrating the drill"
+    assert "let's practice" in readme, "README.md never says how to start a drill"
+    missing = [c for c in ("list", "items") if f"python -m voxlib.drill {c}" not in readme]
+    assert not missing, f"README.md documents no `drill {missing}` for reading your own data"
 
 
 def test_local_drills_load_and_have_distinct_names():

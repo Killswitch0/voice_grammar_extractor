@@ -11,13 +11,16 @@ Each file is one drill:
     category: <the "## <Mistake Name>" heading in analysis/memory.md it trains>
     target: <one line: which structure this makes automatic>
     instructions: |
-      <what the person does; keep it short>
+      <context for whoever asks the prompts; keep it short>
     items:
       - prompt: he / fanatic          # content words only — you supply the grammar
         example: He's a fanatic.      # the model answer
         wrong: He's fanatic.          # the mistake this item exists to catch
         attempted: <regex matching the structure however it came out>
         correct: <regex matching only the right form>
+
+Drills are asked inside Conversation Practice Mode — say "let's practice" — one
+prompt at a time, and scored at the end. Nothing is recorded or transcribed.
 
 The two regexes are matched against lowercased, punctuation-free text, so write
 them in lower case. `attempted` must match BOTH the example and the
@@ -30,9 +33,9 @@ Two rules worth following, both learned the hard way:
   - Include contrast items, where the target structure must NOT be used. A drill
     that only ever adds an article, a preposition or an "-s" teaches "always add
     it", which is the mirror-image error.
-  - Keep the pool bigger than one take — at least twice the sample size. A fixed
-    list the length of a session stops testing the pattern and starts testing
-    the list.
+  - Keep the pool several times the size of one session's block (about five
+    items). A pool barely larger than a session stops testing the pattern and
+    starts testing the list.
 
 Ask Claude to write one: the session-report workflow (CLAUDE.md step 5) creates
 a drill whenever the current primary target has none.

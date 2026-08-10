@@ -413,7 +413,7 @@ also means it isn't backed up anywhere by default; see
 [`analysis/BACKUP.md`](analysis/BACKUP.md) for a 10-minute setup that gives
 it its own private repo and a one-command backup.
 
-## Spoken drills
+## Drills
 
 Everything else this project measures is a numerator. "Six article mistakes per
 thousand words" can't say *out of how many chances*, because nothing counts how
@@ -422,82 +422,48 @@ conversational turns to a long monologue, your error rate can rise while your
 accuracy improves, and the two look identical in the trend.
 
 A drill fixes that by fixing the denominator in advance. It's a set of prompts
-you answer out loud, scored against a known answer key: **19/20 and 12/20 mean
-the same thing in any session.** Each prompt gives you the content words only —
-you supply the grammar:
+with a known answer key: **12/15 and 8/15 mean the same thing in any session.**
+Each prompt gives the content words only — you supply the grammar:
 
 ```
  1. he / fanatic              ->  "He's a fanatic."
  2. I have / electric guitar  ->  "I have an electric guitar."
 ```
 
-### Who runs what
+### How you use it
 
-| | Who does it |
-|---|---|
-| Writing a drill for your current problem | Claude, during session analysis |
-| Choosing which drill and which prompts | Claude, or `drill show` |
-| Answering the prompts | you — that's the whole exercise |
-| Scoring and recording the attempt | Claude, or `drill score` |
+Open this folder in Claude Code and say **"let's practice"**.
 
-You never have to touch the commands below: in Claude Code you can just say
-"let's practice" or "run the articles drill." They're here because it's your
-data and you should be able to read it without asking an AI.
+That's the whole thing. Claude picks the pattern you're currently worst at, opens
+with about five drill prompts one at a time, corrects each answer, weaves the
+same structure back into the conversation afterwards, and records the score. You
+don't run anything, and there is nothing to record — drills live in the dialogue,
+recordings stay for free speech and the long-term trend.
 
-### Typed, inside Claude Code (daily)
+Prompts lead with whatever you missed last time, then whatever you haven't seen,
+so a pool of thirty-odd items never turns into a memorised list of five.
 
-Say **"let's practice"**. Claude picks the pattern you're worst at, opens with
-five drill prompts one at a time, corrects each answer, then moves into normal
-conversation. Nothing for you to run.
+### Reading your own history
 
-### Spoken (weekly)
-
-Typing gives you time to think, which is exactly what live speech doesn't. The
-spoken run is the real measurement:
+You never need these, but it's your data:
 
 ```bash
-python -m voxlib.drill list                       # what drills you have
-python -m voxlib.drill show articles-linking-verb # draws a sample; say them out loud, one take
-./run.sh recordings/my-drill.m4a --no-diarization # transcribe it
-python -m voxlib.drill score articles-linking-verb
+python -m voxlib.drill                                # every attempt: score and accuracy
+python -m voxlib.drill list                           # what drills you have
+python -m voxlib.drill items articles-linking-verb    # which prompts keep failing
 ```
 
-```
-✗  1. He's fanatic.   → He's a fanatic.   [2.0s]
-✓  2. I'm an open-minded person.   [4.5s]
-·  3. not heard — skipped, or the recogniser missed it
-✓  4. That's a very big sign.   [7.5s]
-✓  5. He's a foreigner.   [2.5s]
+Accuracy is over items *attempted* — a prompt you answered with a different
+construction isn't counted as an error either way. Each attempt also stores a
+fingerprint of the item pool, so if a drill is edited later, the history says so
+instead of drawing one trend through two different measurements.
 
-3/4 correct (75%) of 5 items attempted.
-Median 3.5s per item — accuracy at conversational pace is the goal, not accuracy alone.
-1 line(s) excluded as low-confidence
-```
+### What a drill score does and doesn't tell you
 
-Three things that output is being careful about:
-
-- **Pace, next to accuracy.** Fifteen right with a four-second pause before each
-  is a different skill from fifteen right at speaking speed, and only the second
-  one is automatic.
-- **Lines the recogniser doubted are excluded, not counted as mistakes.** An
-  unstressed "a" is exactly what speech-to-text drops, so scoring those would
-  measure Whisper rather than you.
-- **Skipped prompts aren't errors.** Accuracy is over items actually attempted.
-
-Run `score <drill> --calibrate` once on a recording of the answers read aloud
-*deliberately correctly*. Whatever still comes back wrong is the tool's error
-rate, not yours — worth knowing before you read anything into a score.
-
-### Reading your history
-
-```bash
-python -m voxlib.drill                        # every attempt: score, accuracy, pace
-python -m voxlib.drill items articles-linking-verb   # which prompts keep failing
-```
-
-Typed, spoken and calibration runs are kept as three separate series and never
-averaged together — typed scores run higher by construction, and letting them
-blend in would make a week of typing look like progress in speech.
+It tells you whether you **know** the form: you answered in writing, with time to
+think and one structure in mind. It does not tell you whether the form survives
+into speech — that's what the recordings are for. A pattern you score well on and
+still get wrong in a recording isn't misunderstood; it just isn't automatic yet.
 
 ### Your drills are yours
 

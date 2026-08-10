@@ -8,7 +8,7 @@ name: a-or-an
 category: Test Article Choice
 target: '"a" or "an" before a common noun'
 instructions: |
-  Invented content. Say each sentence out loud, in order.
+  Invented content. Give the whole sentence for each prompt.
 
 items:
   - prompt: I have / apple

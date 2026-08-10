@@ -219,10 +219,10 @@ their rules together in one response.
     - **Recording** is the instrument. Roughly two a week keeps the trend
       honest. More recordings do not make the measurement better; they mostly
       consume the time the treatment needed.
-    - **Corrected repetitions** are the treatment. Two channels exist:
-      Conversation Practice Mode, where every sentence is corrected within
-      seconds, and spoken drills (`python -m voxlib.drill`, step 4b), where one
-      frame is produced against a known answer key.
+    - **Corrected repetitions** are the treatment, and they all happen in
+      Conversation Practice Mode: every sentence is corrected within seconds,
+      and the session opens with a drill (`python -m voxlib.drill`, step 4b)
+      that produces one frame against a known answer key.
 
     When writing the action plan, compare the two counts since the last session
     and say plainly if the practice side is the smaller one. Five things to
@@ -405,57 +405,45 @@ for this recording (`words_per_minute` is still valid).
 ## 4b. Read the drill history
 
 ```bash
-python -m voxlib.drill                          # accuracy and pace per attempt, oldest first
+python -m voxlib.drill                          # accuracy per attempt, oldest first
 python -m voxlib.drill list                     # what drills exist, and the category each trains
 python -m voxlib.drill items <drill-name>       # which prompts keep failing
 ```
 
-A drill is N fixed prompts spoken out loud and scored against a known answer
-key, so it is **the only measurement here with a denominator**. Everything in
-`mistakes.csv` is a numerator: so many errors in so many words, with no way to
-know out of how many opportunities. That matters more than it sounds — a
-speaker who moves from short conversational turns to a long monologue produces
-far more noun phrases per hundred words, so an article error *rate* can rise
-while accuracy improves, and the two readings are indistinguishable in that
-series. A drill score cannot drift that way: 19/20 and 12/20 mean the same
-thing in any session.
+A drill is N fixed prompts answered in Conversation Practice Mode and scored
+against a known answer key, so it is **the only measurement here with a
+denominator**. Everything in `mistakes.csv` is a numerator: so many errors in so
+many words, with no way to know out of how many opportunities. That matters more
+than it sounds — a speaker who moves from short conversational turns to a long
+monologue produces far more noun phrases per hundred words, so an article error
+*rate* can rise while accuracy improves, and the two readings are
+indistinguishable in that series. A drill score cannot drift that way: 19/20 and
+12/20 mean the same thing in any session.
 
 So when a drill exists for a tracked category, **report its accuracy trend
-alongside that category's rate**, and where the two disagree, say so and trust
-the drill for accuracy and the rate for how often the structure is being
-attempted in free speech. They answer different questions: the drill says
-whether the form is known under pressure, the rate says whether it survives
-into unmonitored speech. A category that scores well in drills and still
-appears in recordings is not misunderstood — it is not yet automatic, and the
-fix is volume, not explanation.
+alongside that category's rate**, and where the two disagree, say so.
 
-Four columns are instructions rather than decoration:
+They answer different questions, and the difference is the whole point: the
+drill is answered in writing, with time to think and one structure in mind, so
+it says whether the form is *known*. The recording is unmonitored speech, so it
+says whether the form *survives* into production. A category that scores well in
+drills and still appears in recordings is not misunderstood — it is not yet
+automatic, and the fix is volume, not explanation. Never present a drill score
+as evidence about speech.
 
-- **`Pace`** — median seconds per item, thinking pause included. Report it next
-  to accuracy and never instead of it: the same score at half the pause is the
-  actual progress, and a score that improves while pace worsens usually means
-  the answers are being assembled rather than produced. Blank means the drill
-  was scored from a plain transcript with no timings.
+Two columns are instructions rather than decoration:
+
 - **`Set`** — the fingerprint of the item pool. If it changed between two rows,
   the drill was edited, and the scores either side are different measurements —
   say so instead of drawing one trend through both.
-- **`Mode`** — three separate series, never one. `drill` is spoken and is the
-  measurement. `typed` rows come from Conversation Practice Mode (P19) and run
-  higher by construction — time to think, no recogniser — so reading them as
-  progress in speech is exactly the mistake this column exists to prevent; what
-  they are good for is a *miss*, which is strong evidence the item isn't known.
-  `calibration` rows are the answers read aloud deliberately correctly, so their
-  misses are the instrument's error rate, not the speaker's — use them to say
-  how many misses in a real run are noise.
-- **unscorable lines** — lines excluded because the recogniser wasn't sure of
-  them. A drill where many lines were excluded is a recording problem, not a
-  result, the same way a high low-confidence word share is in step 4.
+- **`Score` vs `items`** — accuracy is over items *attempted*. A prompt answered
+  with some other construction counts towards neither side.
 
 `analysis/drills.csv` and `analysis/drill_items.csv` are written by
 `python -m voxlib.drill score` and read here. Never edit them by hand. If they
-don't exist yet, no drills have been run — say that in the fluency/action-plan
-sections rather than treating it as a zero, and see rule 19 about which side of
-the budget is short.
+don't exist yet, no drills have been run — say that in the action-plan section
+rather than treating it as a zero, and see rule 19 about which side of the
+budget is short.
 
 ## 5. Produce the session report
 
@@ -497,7 +485,7 @@ vocabulary** (rule 17). If any priority is marked `!` (stalled) in
 `python -m voxlib.mistakes`, rule 18 applies — change the drill, don't repeat
 last session's goal.
 
-**Targeted practice** — one spoken drill, and at most 3 written items.
+**Targeted practice** — name the drill, and at most 3 written items.
 
 The drill is the instrument, not the written exercises. A recurring mistake at
 this level is almost always understood as a rule and still produced under time
@@ -505,37 +493,20 @@ pressure, which is exactly the knowledge a fill-in-the-blank exercise tests and
 finds intact. Twelve written exercises a session were generating recognition
 practice for a production problem.
 
-So: pick the drill whose `category` matches this session's primary target
-(`python -m voxlib.drill list`) and name it in the report with the command to
-run it —
-
-```bash
-python -m voxlib.drill show <drill-name>     # draws a sample; say them out loud, in order, one take
-./run.sh recordings/<drill-recording> --no-diarization
-python -m voxlib.drill score <drill-name>    # scores that sample and records the attempt
-```
-
-`show` draws a sample from the pool — items missed last time first, then ones
-never seen — and writes the selection down, so `score` marks exactly the
-prompts that were read. `score` defaults to `output/lines.json` rather than the
-clean transcript, and should stay that way: lines the recogniser wasn't sure of
-are excluded from scoring instead of being counted as the speaker's mistakes,
-and the timings are what make pace measurable.
-
-Recommend a **calibration run** (`score <drill> --calibrate` on a recording of
-the answers read aloud deliberately correctly) whenever a drill is new, or when
-a score drops with no other explanation. It separates the speaker's error rate
-from the instrument's, which for articles is not a small question — an
-unstressed "a" is exactly what a recogniser drops.
+So: name the drill whose `category` matches this session's primary target
+(`python -m voxlib.drill list`) and say to run it in Conversation Practice Mode
+— "say *let's practice* and it opens with this drill". **Do not print the drill
+prompts here and do not ask the owner to run anything**: the drill is asked one
+at a time in dialogue, where each answer is corrected on the spot, and a list of
+prompts in a report is a written exercise again.
 
 If no drill covers the primary target, **write one** into `drills/` following
-the format documented in `drills/README.txt`: content words only in the prompt (the speaker
-supplies the grammar), a model answer and a counter-example per item, and the
-two regexes that tell them apart. Include contrast items — cases where the
-target structure must *not* be used — or the drill teaches "always add it",
-which is the mirror-image error. The pool must be larger than one take (the
-test suite enforces it, along with checking every pattern against its own
-examples), so aim for at least twice the sample size.
+the format documented in `drills/README.txt`: content words only in the prompt
+(the speaker supplies the grammar), a model answer and a counter-example per
+item, and the two regexes that tell them apart. Include contrast items — cases
+where the target structure must *not* be used — or the drill teaches "always add
+it", which is the mirror-image error. Keep the pool several times a session's
+block, so it never becomes a memorised list.
 
 The written items are capped at 3, exist only for a secondary pattern with no
 drill, and are generated ONLY from mistakes actually found this session. Do not
@@ -865,22 +836,21 @@ P19. If the session's focus category has a drill (its `category:` matches the
      order asked, and record the attempt:
 
      ```bash
-     python -m voxlib.drill score "<drill-name>" --typed --transcript <file>
+     python -m voxlib.drill score "<drill-name>" --answers <file>
      ```
 
-     `--typed` is not optional. A typed answer is produced with time to think
-     and no recogniser in the way, which makes it reliably easier than the
-     same item spoken; recording it as an ordinary run would let a week of
-     typing read as progress in speech. The two are kept as separate series
-     and a typed hit never retires an item from the spoken drill — only a
-     typed *miss* counts, and it counts as a miss.
+     This is the only place drills are run. Never ask them to record
+     themselves speaking the prompts, or to run the transcription pipeline for
+     a drill — recordings are for free speech and the session trend, and an
+     exercise that costs a recorder app and a transcription run is one that
+     doesn't get done.
 
      If the category has no drill, skip this entirely and run the session as
      a normal conversation. Do not invent prompts and score them by hand:
      an unscored improvised block is the fill-in-the-blank exercise this was
      built to replace.
-P20. An item missed in a **spoken** drill must come back in conversation
-     in different words, never as the same sentence. Re-asking the sentence
+P20. An item missed in the drill block must come back later in the same
+     conversation in different words, never as the same sentence. Re-asking the sentence
      verbatim trains the answer; the point is the frame, and the only proof
      it transferred is producing it somewhere the wording is new. Take the
      failing prompts from `python -m voxlib.drill items "<drill-name>"`,
@@ -1031,9 +1001,9 @@ analysis/
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.
   drills.csv             append-only, written by `python -m voxlib.drill score`: one row
-                           per drill attempt — items, attempted, correct, pace, the pool's
-                           fingerprint and whether it was a calibration run. The only score
-                           here with a denominator. Read it in step 4b; don't edit it.
+                           per drill attempt — items, attempted, correct and the pool's
+                           fingerprint. The only score here with a denominator. Read it in
+                           step 4b; don't edit it.
   drill_items.csv        append-only, same writer: one row per item per attempt, so
                            "which prompt keeps failing" is answerable and the next sample
                            can lead with it. Read via `python -m voxlib.drill items`.
