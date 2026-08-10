@@ -1,14 +1,16 @@
 """
 Tests for spoken drills.
 
-The important one is `test_every_shipped_drill_item_scores_its_own_examples`.
-Every item carries a model answer and a counter-example, and the patterns that
-score it are hand-written regexes over speech-to-text output — the one place in
-this project where a silent authoring mistake produces a plausible-looking
-number instead of an error. A pattern that doesn't match its own example scores
+The important one is `test_every_drill_item_scores_its_own_examples`. Every item
+carries a model answer and a counter-example, and the patterns that score it are
+hand-written regexes over speech-to-text output — the one place in this project
+where a silent authoring mistake produces a plausible-looking number instead of
+an error. A pattern that doesn't match its own example scores
 a correct answer as "not heard"; one that accepts its own counter-example scores
 a mistake as a hit. Both are worse than no drill at all, because the number
-still gets recorded.
+still gets recorded. It runs over the committed fixture and over the owner's own
+`drills/` when that exists, since those never reach CI and are exactly the ones
+written in a hurry.
 """
 
 from __future__ import annotations
@@ -23,7 +25,12 @@ import pytest
 from voxlib import drill
 from voxlib.drill import Drill, DrillItem, ItemRow, SpokenLine
 
-DRILLS_DIR = Path(__file__).parent.parent / "drills"
+# Engine and CLI tests run against invented content. The real drills are built
+# from the owner's own mistakes, which makes them personal data — `drills/` is
+# gitignored, so nothing here may depend on it being populated.
+DRILLS_DIR = Path(__file__).parent / "fixtures" / "drills"
+LOCAL_DRILLS = Path(__file__).parent.parent / "drills"
+FIXTURE_DRILL = "a-or-an"
 
 
 def _item(prompt="say it", example="He's a fanatic.", wrong="He's fanatic.",
@@ -50,12 +57,21 @@ def _spoken(*texts) -> list[SpokenLine]:
 
 # --- the shipped content -----------------------------------------------------
 
-def test_the_drills_directory_is_not_empty():
-    assert drill.load_all(DRILLS_DIR), "no drills shipped — the feature has no content"
+def test_the_fixture_drill_loads():
+    assert drill.load_all(DRILLS_DIR), "the test fixture is missing — nothing to exercise"
 
 
-@pytest.mark.parametrize("path", sorted(DRILLS_DIR.glob("*.yaml")), ids=lambda p: p.stem)
-def test_every_shipped_drill_item_scores_its_own_examples(path: Path):
+@pytest.mark.parametrize(
+    "path",
+    sorted(DRILLS_DIR.glob("*.yaml")) + sorted(LOCAL_DRILLS.glob("*.yaml")),
+    ids=lambda p: p.stem,
+)
+def test_every_drill_item_scores_its_own_examples(path: Path):
+    """
+    Runs over the fixture and, when present, over the owner's own drills — the
+    latter never reach CI, and this is the only thing standing between a
+    mistyped regex and a score that looks reasonable while measuring nothing.
+    """
     loaded = drill.load_drill(path)
     assert loaded.name == path.stem, "the drill's name is how it's invoked; keep it the filename"
 
@@ -75,8 +91,12 @@ def test_every_shipped_drill_item_scores_its_own_examples(path: Path):
         )
 
 
-@pytest.mark.parametrize("path", sorted(DRILLS_DIR.glob("*.yaml")), ids=lambda p: p.stem)
-def test_a_shipped_pool_is_bigger_than_one_take(path: Path):
+@pytest.mark.parametrize(
+    "path",
+    sorted(DRILLS_DIR.glob("*.yaml")) + sorted(LOCAL_DRILLS.glob("*.yaml")),
+    ids=lambda p: p.stem,
+)
+def test_a_pool_is_bigger_than_one_take(path: Path):
     """
     A fixed list of exactly the length you speak stops testing the pattern and
     starts testing the list: after a few runs it's memorised and the score is
@@ -503,38 +523,38 @@ def _cli_paths(tmp_path: Path) -> list[str]:
 
 
 def test_show_prints_a_sample_without_giving_away_the_answers(tmp_path: Path, capsys):
-    exit_code = drill.main(_cli_paths(tmp_path) + ["show", "articles-linking-verb"])
+    exit_code = drill.main(_cli_paths(tmp_path) + ["show", FIXTURE_DRILL])
     out = capsys.readouterr().out
 
     assert exit_code == 0
-    assert f"{drill.DEFAULT_SAMPLE} of 36 items" in out
-    assert "He's a fanatic." not in out, "reading the answer first makes it recognition practice"
+    assert f"{drill.DEFAULT_SAMPLE} of 18 items" in out
+    assert "I have an apple." not in out, "reading the answer first makes it recognition practice"
 
 
 def test_show_records_the_selection_for_scoring(tmp_path: Path, capsys):
-    drill.main(_cli_paths(tmp_path) + ["show", "articles-linking-verb", "--sample", "3"])
+    drill.main(_cli_paths(tmp_path) + ["show", FIXTURE_DRILL, "--sample", "3"])
     capsys.readouterr()
 
-    pending = drill.read_pending(tmp_path / "pending.json", "articles-linking-verb")
+    pending = drill.read_pending(tmp_path / "pending.json", FIXTURE_DRILL)
     assert pending is not None and len(pending) == 3
 
 
 def test_show_with_answers_reveals_both_the_right_and_the_wrong_form(tmp_path: Path, capsys):
-    drill.main(_cli_paths(tmp_path) + ["show", "articles-linking-verb", "--answers"])
+    drill.main(_cli_paths(tmp_path) + ["show", FIXTURE_DRILL, "--answers"])
     out = capsys.readouterr().out
 
-    assert "He's a fanatic." in out
-    assert "He's fanatic." in out
+    assert "I have an apple." in out
+    assert "I have a apple." in out
 
 
 def test_scoring_uses_the_sample_that_was_shown(tmp_path: Path, capsys):
     transcript = tmp_path / "t.txt"
-    transcript.write_text("He's fanatic.\n", encoding="utf-8")
+    transcript.write_text("I have a apple.\n", encoding="utf-8")
     paths = _cli_paths(tmp_path)
 
-    drill.main(paths + ["show", "articles-linking-verb", "--sample", "2"])
+    drill.main(paths + ["show", FIXTURE_DRILL, "--sample", "2"])
     capsys.readouterr()
-    drill.main(paths + ["score", "articles-linking-verb", "--transcript", str(transcript),
+    drill.main(paths + ["score", FIXTURE_DRILL, "--transcript", str(transcript),
                         "--date", "2026-08-10"])
     out = capsys.readouterr().out
 
@@ -545,9 +565,9 @@ def test_scoring_uses_the_sample_that_was_shown(tmp_path: Path, capsys):
 
 def test_scoring_a_plain_transcript_says_what_it_cannot_see(tmp_path: Path, capsys):
     transcript = tmp_path / "t.txt"
-    transcript.write_text("He's a fanatic.\n", encoding="utf-8")
+    transcript.write_text("I have an apple.\n", encoding="utf-8")
 
-    drill.main(_cli_paths(tmp_path) + ["score", "articles-linking-verb",
+    drill.main(_cli_paths(tmp_path) + ["score", FIXTURE_DRILL,
                                        "--transcript", str(transcript), "--dry-run"])
 
     assert "no confidence flags and no timings" in capsys.readouterr().out
@@ -555,9 +575,9 @@ def test_scoring_a_plain_transcript_says_what_it_cannot_see(tmp_path: Path, caps
 
 def test_a_calibration_run_is_labelled_as_the_instruments_error(tmp_path: Path, capsys):
     transcript = tmp_path / "t.txt"
-    transcript.write_text("He's fanatic.\n", encoding="utf-8")
+    transcript.write_text("I have a apple.\n", encoding="utf-8")
 
-    drill.main(_cli_paths(tmp_path) + ["score", "articles-linking-verb", "--calibrate",
+    drill.main(_cli_paths(tmp_path) + ["score", FIXTURE_DRILL, "--calibrate",
                                        "--transcript", str(transcript), "--date", "2026-08-10"])
     out = capsys.readouterr().out
 
@@ -568,9 +588,9 @@ def test_a_calibration_run_is_labelled_as_the_instruments_error(tmp_path: Path, 
 
 def test_a_dry_run_scores_without_recording(tmp_path: Path):
     transcript = tmp_path / "t.txt"
-    transcript.write_text("He's a fanatic.\n", encoding="utf-8")
+    transcript.write_text("I have an apple.\n", encoding="utf-8")
 
-    drill.main(_cli_paths(tmp_path) + ["score", "articles-linking-verb",
+    drill.main(_cli_paths(tmp_path) + ["score", FIXTURE_DRILL,
                                        "--transcript", str(transcript), "--dry-run"])
 
     assert not (tmp_path / "drills.csv").exists()
@@ -578,46 +598,46 @@ def test_a_dry_run_scores_without_recording(tmp_path: Path):
 
 def test_the_items_view_shows_which_prompts_keep_failing(tmp_path: Path, capsys):
     transcript = tmp_path / "t.txt"
-    transcript.write_text("He's fanatic.\n", encoding="utf-8")
+    transcript.write_text("I have a apple.\n", encoding="utf-8")
     paths = _cli_paths(tmp_path)
-    drill.main(paths + ["score", "articles-linking-verb", "--transcript", str(transcript),
+    drill.main(paths + ["score", FIXTURE_DRILL, "--transcript", str(transcript),
                         "--whole-drill", "--date", "2026-08-10"])
     capsys.readouterr()
 
-    drill.main(paths + ["items", "articles-linking-verb"])
+    drill.main(paths + ["items", FIXTURE_DRILL])
     out = capsys.readouterr().out
 
-    assert "he / fanatic" in out
+    assert "I have / apple" in out
     assert "2026-08-10" in out
 
 
 def test_next_hands_practice_mode_the_prompts_without_the_answers(tmp_path: Path, capsys):
     """This output is visible to the person answering, so printing the key would
     turn the block into a reading exercise."""
-    exit_code = drill.main(_cli_paths(tmp_path) + ["next", "articles-linking-verb"])
+    exit_code = drill.main(_cli_paths(tmp_path) + ["next", FIXTURE_DRILL])
     out = capsys.readouterr().out
 
     assert exit_code == 0
-    assert "he / fanatic" in out
-    assert "He's a fanatic." not in out
+    assert "I have / apple" in out
+    assert "I have an apple." not in out
     assert "--typed" in out
 
 
 def test_next_records_the_selection_so_the_typed_answers_can_be_scored(tmp_path: Path, capsys):
-    drill.main(_cli_paths(tmp_path) + ["next", "articles-linking-verb", "--count", "3"])
+    drill.main(_cli_paths(tmp_path) + ["next", FIXTURE_DRILL, "--count", "3"])
     capsys.readouterr()
 
-    assert len(drill.read_pending(tmp_path / "pending.json", "articles-linking-verb")) == 3
+    assert len(drill.read_pending(tmp_path / "pending.json", FIXTURE_DRILL)) == 3
 
 
 def test_a_typed_run_is_recorded_as_its_own_series(tmp_path: Path, capsys):
     answers = tmp_path / "answers.txt"
-    answers.write_text("He's a fanatic.\n", encoding="utf-8")
+    answers.write_text("I have an apple.\n", encoding="utf-8")
     paths = _cli_paths(tmp_path)
-    drill.main(paths + ["next", "articles-linking-verb", "--count", "1"])
+    drill.main(paths + ["next", FIXTURE_DRILL, "--count", "1"])
     capsys.readouterr()
 
-    drill.main(paths + ["score", "articles-linking-verb", "--typed",
+    drill.main(paths + ["score", FIXTURE_DRILL, "--typed",
                         "--transcript", str(answers), "--date", "2026-08-10"])
     out = capsys.readouterr().out
 
@@ -640,4 +660,4 @@ def test_an_unknown_drill_name_lists_what_is_available(tmp_path: Path, capsys):
     with pytest.raises(SystemExit):
         drill.main(_cli_paths(tmp_path) + ["show", "nope"])
 
-    assert "articles-linking-verb" in capsys.readouterr().err
+    assert FIXTURE_DRILL in capsys.readouterr().err

@@ -529,7 +529,7 @@ from the instrument's, which for articles is not a small question — an
 unstressed "a" is exactly what a recogniser drops.
 
 If no drill covers the primary target, **write one** into `drills/` following
-the format of the existing files: content words only in the prompt (the speaker
+the format documented in `drills/README.txt`: content words only in the prompt (the speaker
 supplies the grammar), a model answer and a counter-example per item, and the
 two regexes that tell them apart. Include contrast items — cases where the
 target structure must *not* be used — or the drill teaches "always add it",
@@ -1006,8 +1006,12 @@ recordings/            raw audio/video files (owner drops files here)
 voice_reference/       my_reference.wav — PERMANENT, not overwritten by runs
 drills/                one YAML per spoken drill: the prompts, a model answer and a
                          counter-example per item, and the patterns that score them.
-                         Shipped content, not personal data — safe to commit. Add one
-                         whenever a primary target has no drill (step 5).
+                         PERSONAL DATA and gitignored — the prompts are reconstructions
+                         of the owner's own sentences, and every user's drills are
+                         built from their own mistakes. See drills/README.txt for the
+                         format; write a new one whenever a primary target has no
+                         drill (step 5). An invented example lives in
+                         tests/fixtures/drills/.
 output/                 all overwritten on every run:
   transcript_clean.txt      just the lines, one per line
   transcript_annotated.txt  timestamps, source file, [?] markers — for reading by eye

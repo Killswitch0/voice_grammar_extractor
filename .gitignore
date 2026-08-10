@@ -3,6 +3,8 @@ recordings/*
 !recordings/README.txt
 voice_reference/*
 !voice_reference/README.txt
+drills/*
+!drills/README.txt
 output/
 analysis/sessions/*
 !analysis/sessions/README.txt
