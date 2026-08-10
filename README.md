@@ -396,7 +396,8 @@ Pasting `transcript_clean.txt` into an AI once gives you a one-off review.
 project folder in Claude Code and ask it to "analyze the new recording." It
 will archive the session's transcript under `analysis/sessions/`, produce a
 coaching report (CEFR estimate, ranked mistakes, natural-English rewrites,
-vocabulary suggestions, targeted exercises), and update `analysis/memory.md`
+vocabulary suggestions, a spoken drill to practice with), and update
+`analysis/memory.md`
 — the running record of which mistakes are still recurring, which have
 improved, and what to focus on next.
 
@@ -411,6 +412,66 @@ it's your personal data, not something to publish alongside the code. That
 also means it isn't backed up anywhere by default; see
 [`analysis/BACKUP.md`](analysis/BACKUP.md) for a 10-minute setup that gives
 it its own private repo and a one-command backup.
+
+## Drills
+
+Everything else this project measures is a numerator. "Six article mistakes per
+thousand words" can't say *out of how many chances*, because nothing counts how
+many singular countable nouns you actually said — so if you switch from short
+conversational turns to a long monologue, your error rate can rise while your
+accuracy improves, and the two look identical in the trend.
+
+A drill fixes that by fixing the denominator in advance. It's a set of prompts
+with a known answer key: **12/15 and 8/15 mean the same thing in any session.**
+Each prompt gives the content words only — you supply the grammar:
+
+```
+ 1. he / fanatic              ->  "He's a fanatic."
+ 2. I have / electric guitar  ->  "I have an electric guitar."
+```
+
+### How you use it
+
+Open this folder in Claude Code and say **"let's practice"**.
+
+That's the whole thing. Claude picks the pattern you're currently worst at, opens
+with about five drill prompts one at a time, corrects each answer, weaves the
+same structure back into the conversation afterwards, and records the score. You
+don't run anything, and there is nothing to record — drills live in the dialogue,
+recordings stay for free speech and the long-term trend.
+
+Prompts lead with whatever you missed last time, then whatever you haven't seen,
+so a pool of thirty-odd items never turns into a memorised list of five.
+
+### Reading your own history
+
+You never need these, but it's your data:
+
+```bash
+python -m voxlib.drill                                # every attempt: score and accuracy
+python -m voxlib.drill list                           # what drills you have
+python -m voxlib.drill items articles-linking-verb    # which prompts keep failing
+```
+
+Accuracy is over items *attempted* — a prompt you answered with a different
+construction isn't counted as an error either way. Each attempt also stores a
+fingerprint of the item pool, so if a drill is edited later, the history says so
+instead of drawing one trend through two different measurements.
+
+### What a drill score does and doesn't tell you
+
+It tells you whether you **know** the form: you answered in writing, with time to
+think and one structure in mind. It does not tell you whether the form survives
+into speech — that's what the recordings are for. A pattern you score well on and
+still get wrong in a recording isn't misunderstood; it just isn't automatic yet.
+
+### Your drills are yours
+
+`drills/` is gitignored, like `analysis/` and `recordings/`. A drill is built
+from the mistakes *you* make, so its prompts are reconstructions of your own
+sentences; there's nothing generic to ship. Ask Claude to write one — it does
+this automatically when your current focus has no drill yet. See
+[`drills/README.txt`](drills/README.txt) for the file format.
 
 ## Installing as a console command
 
