@@ -37,12 +37,25 @@ an unmeasured metric, for the same reason.
 occurrences with recent sessions weighted more heavily. That is an arithmetic
 instruction, and arithmetic carried out in prose by a model reading its own
 previous prose is where the ranking quietly drifts.
+
+A note on why impact takes the square root of the rate. The first version
+multiplied severity by the raw rate, and on real data that turned out to be
+frequency ranking wearing a severity costume: across the fourteen tracked
+categories severity spanned 2-4 (a factor of two) while the rate spanned
+0.21-6.00 per 1,000 words (a factor of twenty-nine), so the rate decided
+everything. The proof was that conditional "will" — severity 4, the highest on
+record, and described in memory.md as "highest severity of anything tracked" —
+ranked twelfth of fourteen, while articles sat at #1 for five sessions running
+with their rate *rising*. Damping the rate puts the two terms on comparable
+footing: frequency still matters, it just stops being the only thing that does.
+See CLAUDE.md rules 15-16.
 """
 
 from __future__ import annotations
 
 import csv
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -69,6 +82,22 @@ RECENCY_WEIGHTS = (3, 2, 1)
 # Consecutive sessions a mistake must be explicitly absent from before it moves
 # to Improvements. Mirrors the rule in CLAUDE.md step 6.
 ABSENCE_STREAK_FOR_IMPROVEMENT = 3
+
+# The severity at which a mistake stops being a matter of polish and starts
+# costing the listener something. Rule 16 defines the scale in terms of what the
+# listener loses: 3 and up either garble the meaning or force them to
+# reconstruct it, 2 and below are understood instantly and merely sound foreign.
+# The split exists so the action plan can be a portfolio (rule 17) instead of a
+# top-N of one number, which is how a very frequent, very survivable error ends
+# up owning every slot.
+CLARITY_SEVERITY = 3
+
+# How many measured sessions a category needs before "it isn't moving" is a
+# claim about the speaker rather than about noise, and how far the rate must
+# fall across that window to count as movement. Two sessions can't distinguish a
+# trend from a bad day; a rate that drops less than a quarter over three is flat.
+STALL_WINDOW = 3
+STALL_IMPROVEMENT = 0.25
 
 
 @dataclass
@@ -110,14 +139,22 @@ class CategoryTrend:
     total_occurrences: int
     latest_rate: Optional[float]    # per 1,000 reliable words, most recent measured session
     weighted_rate: float            # recency-weighted, per 1,000 reliable words
-    impact: float                   # severity x weighted_rate — the ranking key
+    impact: float                   # severity x sqrt(weighted_rate) — the ranking key
     absence_streak: int             # consecutive explicit zeros, most recent first
     untested_since: int             # sessions since the last measurable one
     direction: str                  # "worsening" / "improving" / "steady" / "n/a"
+    stalled: bool                   # drilled across STALL_WINDOW sessions and didn't move
 
     @property
     def ready_for_improvements(self) -> bool:
         return self.absence_streak >= ABSENCE_STREAK_FOR_IMPROVEMENT
+
+    @property
+    def tier(self) -> str:
+        """"clarity" if an instance costs the listener something, "polish" if it
+        is understood instantly and only sounds foreign. Rule 16's scale, read
+        back out as the two buckets rule 17's action plan draws from."""
+        return "clarity" if self.severity >= CLARITY_SEVERITY else "polish"
 
 
 def _parse_occurrences(raw: str) -> Optional[int]:
@@ -224,6 +261,52 @@ def _weighted_rate(measured: list[tuple[str, float]]) -> float:
     return round(sum(r * w for r, w in zip(recent, weights)) / sum(weights), 2)
 
 
+def _impact(severity: int, weighted_rate: float) -> float:
+    """
+    The ranking key: severity against the square root of the recency-weighted
+    rate.
+
+    The square root is the whole point and worth stating plainly. Severity is a
+    1-5 judgment, so its useful spread is a factor of five at the very most and
+    in practice — see the module docstring — a factor of two. A rate per 1,000
+    words has no ceiling and on this speaker's data spans a factor of twenty-nine.
+    Multiply the two raw and severity cannot move the ranking; the result is a
+    frequency table that merely looks like it accounts for how much each mistake
+    costs. Damping the rate leaves it decisive between categories that are close
+    on severity, while letting a severity gap outweigh a moderate frequency gap
+    — which is exactly what rule 15 asks for and what the raw product could not
+    deliver.
+    """
+    return round(severity * math.sqrt(weighted_rate), 2)
+
+
+def _stalled(measured: list[tuple[str, float]]) -> bool:
+    """
+    True when a category has been measured across the last STALL_WINDOW sessions
+    and is no better at the end of them than at the start.
+
+    This exists because the ranking alone has no memory of having been acted on.
+    Articles were priority #1 for five consecutive sessions and their rate rose
+    the whole time; nothing in the numbers ever said "this has been drilled and
+    the drill isn't working, change the approach rather than restating the goal."
+    Now something does. Untested sessions are already excluded from `measured`,
+    so a category nobody could observe is never accused of standing still.
+
+    Both ends of the window have to be live for the claim to mean anything. A
+    category that was clean three sessions ago and is back now hasn't stalled —
+    it regressed, which is a different signal with its own handling in CLAUDE.md
+    step 3, and lumping the two together would have flagged six of the fourteen
+    tracked categories and taught the reader to skip the marker.
+    """
+    if len(measured) < STALL_WINDOW:
+        return False
+    window = [rate for _, rate in measured[-STALL_WINDOW:]]
+    latest, started_at = window[-1], window[0]
+    if latest <= 0 or started_at <= 0:
+        return False
+    return latest > started_at * (1 - STALL_IMPROVEMENT)
+
+
 def _direction(measured: list[tuple[str, float]]) -> str:
     """Latest measured rate against the mean of the ones before it. Needs at
     least two measured sessions to say anything at all."""
@@ -291,10 +374,11 @@ def summarize(rows: list[SessionRow]) -> list[CategoryTrend]:
             total_occurrences=sum(r.occurrences or 0 for r in category_rows),
             latest_rate=measured[-1][1] if measured else None,
             weighted_rate=weighted,
-            impact=round(category_rows[-1].severity * weighted, 2),
+            impact=_impact(category_rows[-1].severity, weighted),
             absence_streak=streak,
             untested_since=untested_since,
             direction=_direction(measured),
+            stalled=_stalled(measured),
         ))
 
     trends.sort(key=lambda t: (-t.impact, t.category))
@@ -306,14 +390,16 @@ def format_table(trends: list[CategoryTrend]) -> str:
     if not trends:
         return "No mistakes recorded yet."
 
-    header = f"{'Category':<44} {'Sev':>3} {'Impact':>7} {'Rate/1k':>8} {'Latest':>7} {'Trend':>10} {'Absent':>7}"
+    header = (f"{'Category':<42} {'Sev':>3} {'Tier':>7} {'Impact':>7} {'Rate/1k':>8} "
+              f"{'Latest':>7} {'Trend':>10} {'Absent':>7}")
     lines = [header, "-" * len(header)]
     for t in trends:
         latest = "—" if t.latest_rate is None else f"{t.latest_rate:.2f}"
         absent = f"{t.absence_streak}" + ("*" if t.ready_for_improvements else "")
+        trend = t.direction + ("!" if t.stalled else "")
         lines.append(
-            f"{t.category[:44]:<44} {t.severity:>3} {t.impact:>7.2f} "
-            f"{t.weighted_rate:>8.2f} {latest:>7} {t.direction:>10} {absent:>7}"
+            f"{t.category[:42]:<42} {t.severity:>3} {t.tier:>7} {t.impact:>7.2f} "
+            f"{t.weighted_rate:>8.2f} {latest:>7} {trend:>10} {absent:>7}"
         )
 
     promotable = [t.category for t in trends if t.ready_for_improvements]
@@ -323,6 +409,13 @@ def format_table(trends: list[CategoryTrend]) -> str:
             f"* absent {ABSENCE_STREAK_FOR_IMPROVEMENT}+ measured sessions — move to "
             f"Improvements in memory.md: {', '.join(promotable)}"
         )
+    stalled = [t.category for t in trends if t.stalled]
+    if stalled:
+        lines.append(
+            f"! no better than {STALL_WINDOW} measured sessions ago — if one of these is a "
+            f"current priority, change the drill, don't restate the goal (rule 18): "
+            + ", ".join(stalled)
+        )
     untested = [t.category for t in trends if t.untested_since and not t.ready_for_improvements]
     if untested:
         lines.append(
@@ -330,7 +423,10 @@ def format_table(trends: list[CategoryTrend]) -> str:
             + ", ".join(untested)
         )
     lines.append("")
-    lines.append("Rates are per 1,000 reliable words. Impact = severity x recency-weighted rate.")
+    lines.append("Rates are per 1,000 reliable words. Impact = severity x sqrt(recency-weighted "
+                 "rate); see rule 16 for what severity means.")
+    lines.append(f"Tier: clarity = severity {CLARITY_SEVERITY}+ (costs the listener something), "
+                 f"polish = understood instantly. The action plan draws from both (rule 17).")
     return "\n".join(lines)
 
 
