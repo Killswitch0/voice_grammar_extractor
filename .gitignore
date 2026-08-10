@@ -12,6 +12,8 @@ analysis/scores_history.csv
 analysis/fluency_history.csv
 analysis/mistakes.csv
 analysis/drills.csv
+analysis/drill_items.csv
+analysis/drill_pending.json
 analysis/processed.json
 analysis/conversation_focus_log.md
 analysis/.gitignore

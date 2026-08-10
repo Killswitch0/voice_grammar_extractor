@@ -405,8 +405,9 @@ for this recording (`words_per_minute` is still valid).
 ## 4b. Read the drill history
 
 ```bash
-python -m voxlib.drill              # accuracy per attempt, oldest first
-python -m voxlib.drill list         # what drills exist, and the category each trains
+python -m voxlib.drill                          # accuracy and pace per attempt, oldest first
+python -m voxlib.drill list                     # what drills exist, and the category each trains
+python -m voxlib.drill items <drill-name>       # which prompts keep failing
 ```
 
 A drill is N fixed prompts spoken out loud and scored against a known answer
@@ -428,10 +429,29 @@ into unmonitored speech. A category that scores well in drills and still
 appears in recordings is not misunderstood — it is not yet automatic, and the
 fix is volume, not explanation.
 
-`analysis/drills.csv` is written by `python -m voxlib.drill score` and read
-here. Never edit it by hand. If it doesn't exist yet, no drills have been run —
-say that in the fluency/action-plan sections rather than treating it as a zero,
-and see rule 19 about which side of the budget is short.
+Four columns are instructions rather than decoration:
+
+- **`Pace`** — median seconds per item, thinking pause included. Report it next
+  to accuracy and never instead of it: the same score at half the pause is the
+  actual progress, and a score that improves while pace worsens usually means
+  the answers are being assembled rather than produced. Blank means the drill
+  was scored from a plain transcript with no timings.
+- **`Set`** — the fingerprint of the item pool. If it changed between two rows,
+  the drill was edited, and the scores either side are different measurements —
+  say so instead of drawing one trend through both.
+- **`Mode`** — `calibration` rows are the answers read aloud deliberately
+  correctly, so their misses are the instrument's error rate, not the speaker's.
+  Never mix them into an accuracy trend; use them to say how many misses in a
+  real run are noise.
+- **unscorable lines** — lines excluded because the recogniser wasn't sure of
+  them. A drill where many lines were excluded is a recording problem, not a
+  result, the same way a high low-confidence word share is in step 4.
+
+`analysis/drills.csv` and `analysis/drill_items.csv` are written by
+`python -m voxlib.drill score` and read here. Never edit them by hand. If they
+don't exist yet, no drills have been run — say that in the fluency/action-plan
+sections rather than treating it as a zero, and see rule 19 about which side of
+the budget is short.
 
 ## 5. Produce the session report
 
@@ -486,16 +506,32 @@ So: pick the drill whose `category` matches this session's primary target
 run it —
 
 ```bash
-python -m voxlib.drill show <drill-name>     # prompts; say them out loud, in order, one take
+python -m voxlib.drill show <drill-name>     # draws a sample; say them out loud, in order, one take
 ./run.sh recordings/<drill-recording> --no-diarization
-python -m voxlib.drill score <drill-name>    # scores it and records the attempt
+python -m voxlib.drill score <drill-name>    # scores that sample and records the attempt
 ```
+
+`show` draws a sample from the pool — items missed last time first, then ones
+never seen — and writes the selection down, so `score` marks exactly the
+prompts that were read. `score` defaults to `output/lines.json` rather than the
+clean transcript, and should stay that way: lines the recogniser wasn't sure of
+are excluded from scoring instead of being counted as the speaker's mistakes,
+and the timings are what make pace measurable.
+
+Recommend a **calibration run** (`score <drill> --calibrate` on a recording of
+the answers read aloud deliberately correctly) whenever a drill is new, or when
+a score drops with no other explanation. It separates the speaker's error rate
+from the instrument's, which for articles is not a small question — an
+unstressed "a" is exactly what a recogniser drops.
 
 If no drill covers the primary target, **write one** into `drills/` following
 the format of the existing files: content words only in the prompt (the speaker
 supplies the grammar), a model answer and a counter-example per item, and the
-two regexes that tell them apart. Ten items is the floor — the test suite
-enforces it, along with checking every pattern against its own examples.
+two regexes that tell them apart. Include contrast items — cases where the
+target structure must *not* be used — or the drill teaches "always add it",
+which is the mirror-image error. The pool must be larger than one take (the
+test suite enforces it, along with checking every pattern against its own
+examples), so aim for at least twice the sample size.
 
 The written items are capped at 3, exist only for a secondary pattern with no
 drill, and are generated ONLY from mistakes actually found this session. Do not
@@ -626,19 +662,18 @@ it empty if it wasn't measurable. This file is append-only — never rewrite
 past rows, even if a later session reassesses something differently; the point
 is a raw historical record for graphing later.
 
-Note the division of labour between the three CSVs:
+Note the division of labour between the history files:
 
 | File | Written by | Holds |
 |---|---|---|
 | `scores_history.csv` | you, by hand | your judgment calls — CEFR and the four 0-10 scores |
 | `mistakes.csv` | you, via `python -m voxlib.mistakes add` (step 6) | which mistakes occurred how often, per session |
 | `fluency_history.csv` | the pipeline | how the recording came out and how it was spoken |
-| `drills.csv` | `python -m voxlib.drill score` | drill attempts — correct out of attempted, with a known denominator |
+| `drills.csv` / `drill_items.csv` | `python -m voxlib.drill score` | drill attempts and per-item results — the only scores with a known denominator |
 
-You own the first two. `fluency_history.csv` and `drills.csv` you only ever
-read — don't edit or append to them by hand. All four are append-only: never
-rewrite a past row,
-even if a later session reassesses something differently.
+You own the first two. `fluency_history.csv` and the drill files you only ever
+read — don't edit or append to them by hand. All of them are append-only: never
+rewrite a past row, even if a later session reassesses something differently.
 
 ## 8. Report back in chat
 
@@ -937,8 +972,14 @@ analysis/
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.
   drills.csv             append-only, written by `python -m voxlib.drill score`: one row
-                           per drill attempt — items, attempted, correct. The only score
+                           per drill attempt — items, attempted, correct, pace, the pool's
+                           fingerprint and whether it was a calibration run. The only score
                            here with a denominator. Read it in step 4b; don't edit it.
+  drill_items.csv        append-only, same writer: one row per item per attempt, so
+                           "which prompt keeps failing" is answerable and the next sample
+                           can lead with it. Read via `python -m voxlib.drill items`.
+  drill_pending.json     the sample `drill show` last handed out, waiting to be scored.
+                           Machine state, cleared automatically; don't edit it.
   processed.json         written by the PIPELINE: which recordings have already been
                            transcribed (matched by content, not filename). Guards against
                            merging the same audio into two sessions. Don't edit it.
