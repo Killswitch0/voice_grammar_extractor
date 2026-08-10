@@ -203,7 +203,7 @@ def test_lines_json_carries_confidence_and_timings_into_scoring(tmp_path: Path):
 
     lines = drill.load_spoken_lines(path)
 
-    assert [l.low_confidence for l in lines] == [False, True]
+    assert [line.low_confidence for line in lines] == [False, True]
     assert lines[0].end == 2.0
 
 
@@ -213,8 +213,8 @@ def test_a_plain_transcript_still_loads_with_nothing_known_about_it(tmp_path: Pa
 
     lines = drill.load_spoken_lines(path)
 
-    assert [l.text for l in lines] == ["He's a fanatic.", "She's a teacher."]
-    assert all(l.end is None and not l.low_confidence for l in lines)
+    assert [line.text for line in lines] == ["He's a fanatic.", "She's a teacher."]
+    assert all(line.end is None and not line.low_confidence for line in lines)
 
 
 # --- pace --------------------------------------------------------------------

@@ -319,7 +319,7 @@ def score(drill: Drill, lines: list[SpokenLine], *, mode: str = DRILL_MODE) -> D
     them is evidence about grammar.
     """
     result = DrillResult(drill=drill, mode=mode,
-                         unscorable_lines=sum(1 for l in lines if l.low_confidence))
+                         unscorable_lines=sum(1 for spoken in lines if spoken.low_confidence))
     cursor = 0
     previous_end: Optional[float] = None
 
