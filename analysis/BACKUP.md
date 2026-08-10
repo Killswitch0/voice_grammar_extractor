@@ -60,7 +60,30 @@ even in a private repo. Add to `analysis/.gitignore`:
 ```
 sessions/*.txt
 !sessions/README.txt
+drill_pending.json
 ```
+
+`drill_pending.json` is machine state between `drill next` and `drill score` —
+transient, so it only adds noise and conflicts.
+
+### The drills live outside this folder
+
+`drills/*.yaml` sit in the project root, not in `analysis/`, and the project's
+own `.gitignore` excludes them as personal data — so nothing backs them up by
+default. They matter more than their size suggests: the pool is built from your
+own mistakes and can't be regenerated, and without it `drills.csv` /
+`drill_items.csv` can't be read back at all (the `Set` column is a fingerprint
+of the pool, and every item row is keyed by an `item_id` that no longer exists).
+
+The command in step 6 mirrors them into `analysis/drills/` before committing.
+That copy is a backup, never the thing you edit — `drills/` stays the source of
+truth, and `rsync --delete` overwrites the copy on every run. Add `analysis/drills/`
+to the **project's** `.gitignore` so the copy doesn't land in the project repo,
+which may be public.
+
+If you'd rather keep the drill prompts local-only (same reasoning as the raw
+transcripts — they're reconstructions of your own sentences), drop the `rsync`
+line from step 6 and add `drills/` to `analysis/.gitignore`.
 
 ## 5. First commit and push
 
@@ -105,6 +128,18 @@ backup-analysis() {
   if [[ "$whoami_output" != *"Hi $expected_user!"* ]]; then
     echo "Aborting: SSH identity check failed. Got: $whoami_output"
     cd - > /dev/null; return 1
+  fi
+
+  # Mirror the drill pool in — it lives outside analysis/ and is gitignored
+  # in the project repo, so it is otherwise backed up nowhere (see step 4).
+  local drills_src="${dir%/analysis}/drills"
+  if [[ -d "$drills_src" ]]; then
+    rsync -a --delete "$drills_src/" "$dir/drills/" || {
+      echo "Aborting: failed to mirror drills from $drills_src."
+      cd - > /dev/null; return 1
+    }
+  else
+    echo "Warning: no drills directory at $drills_src — nothing to mirror."
   fi
 
   git add -A

@@ -19,6 +19,7 @@ analysis/drill_pending.json
 analysis/processed.json
 analysis/conversation_focus_log.md
 analysis/.gitignore
+analysis/drills/
 
 # Secrets
 .env
