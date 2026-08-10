@@ -93,6 +93,30 @@ def test_claude_md_knows_about_every_file_the_pipeline_writes(filename):
     )
 
 
+def test_claude_md_tells_the_workflow_to_read_the_drill_history():
+    """
+    Same reasoning as the fluency columns below: a measurement nothing instructs
+    the analysis to look at may as well not exist. Drills are the only score
+    here with a known denominator, and a workflow that never opens them would
+    keep ranking mistakes on rates alone.
+    """
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+
+    assert "voxlib.drill" in text, "CLAUDE.md never tells the workflow to run a drill"
+    assert "drills.csv" in text, "CLAUDE.md never tells the workflow to read drill results"
+
+
+def test_every_shipped_drill_is_discoverable_from_the_drills_directory():
+    """The workflow names drills by filename; a drill that doesn't load is one
+    the report can point at and the owner can't run."""
+    from voxlib import drill
+
+    drills = drill.load_all(REPO_ROOT / "drills")
+
+    assert drills, "the drills/ directory is empty"
+    assert len({d.name for d in drills}) == len(drills), "two drills share a name"
+
+
 @pytest.mark.parametrize("column", ["low_confidence_word_share", "fillers_per_100_words",
                                     "discourse_markers_per_100_words", "words_per_minute"])
 def test_claude_md_tells_the_workflow_to_read_every_measured_column(column):
