@@ -39,14 +39,13 @@ instruction, and arithmetic carried out in prose by a model reading its own
 previous prose is where the ranking quietly drifts.
 
 A note on why impact takes the square root of the rate. The first version
-multiplied severity by the raw rate, and on real data that turned out to be
-frequency ranking wearing a severity costume: across the fourteen tracked
-categories severity spanned 2-4 (a factor of two) while the rate spanned
-0.21-6.00 per 1,000 words (a factor of twenty-nine), so the rate decided
-everything. The proof was that conditional "will" — severity 4, the highest on
-record, and described in memory.md as "highest severity of anything tracked" —
-ranked twelfth of fourteen, while articles sat at #1 for five sessions running
-with their rate *rising*. Damping the rate puts the two terms on comparable
+multiplied severity by the raw rate, which turns out to be frequency ranking
+wearing a severity costume. Severity is a 1-5 judgment and its values cluster
+within a point or two of each other in practice; a rate per 1,000 words has no
+ceiling and routinely differs by an order of magnitude between categories.
+Multiplied raw, the rate decides everything — the highest-severity category on
+record can sit near the bottom of the table while a frequent but survivable one
+holds the top slot for months. Damping the rate puts the two terms on comparable
 footing: frequency still matters, it just stops being the only thing that does.
 See CLAUDE.md rules 15-16.
 """
@@ -268,13 +267,12 @@ def _impact(severity: int, weighted_rate: float) -> float:
 
     The square root is the whole point and worth stating plainly. Severity is a
     1-5 judgment, so its useful spread is a factor of five at the very most and
-    in practice — see the module docstring — a factor of two. A rate per 1,000
-    words has no ceiling and on this speaker's data spans a factor of twenty-nine.
-    Multiply the two raw and severity cannot move the ranking; the result is a
-    frequency table that merely looks like it accounts for how much each mistake
-    costs. Damping the rate leaves it decisive between categories that are close
-    on severity, while letting a severity gap outweigh a moderate frequency gap
-    — which is exactly what rule 15 asks for and what the raw product could not
+    in practice much less. A rate per 1,000 words has no ceiling. Multiply the
+    two raw and severity cannot move the ranking; the result is a frequency
+    table that merely looks like it accounts for how much each mistake costs.
+    Damping the rate leaves it decisive between categories that are close on
+    severity, while letting a severity gap outweigh a moderate frequency gap —
+    which is exactly what rule 15 asks for and what the raw product could not
     deliver.
     """
     return round(severity * math.sqrt(weighted_rate), 2)
@@ -286,8 +284,8 @@ def _stalled(measured: list[tuple[str, float]]) -> bool:
     and is no better at the end of them than at the start.
 
     This exists because the ranking alone has no memory of having been acted on.
-    Articles were priority #1 for five consecutive sessions and their rate rose
-    the whole time; nothing in the numbers ever said "this has been drilled and
+    A category can hold the top priority slot session after session while its
+    rate rises, and nothing in the numbers ever says "this has been drilled and
     the drill isn't working, change the approach rather than restating the goal."
     Now something does. Untested sessions are already excluded from `measured`,
     so a category nobody could observe is never accused of standing still.
@@ -295,8 +293,8 @@ def _stalled(measured: list[tuple[str, float]]) -> bool:
     Both ends of the window have to be live for the claim to mean anything. A
     category that was clean three sessions ago and is back now hasn't stalled —
     it regressed, which is a different signal with its own handling in CLAUDE.md
-    step 3, and lumping the two together would have flagged six of the fourteen
-    tracked categories and taught the reader to skip the marker.
+    step 3. Lumping the two together flags close to half the tracked categories,
+    which teaches the reader to skip the marker.
     """
     if len(measured) < STALL_WINDOW:
         return False

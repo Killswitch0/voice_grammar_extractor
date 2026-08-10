@@ -207,6 +207,48 @@ their rules together in one response.
     regression, handled in step 3, and it doesn't carry the "the drill failed"
     reading because there was no drill to fail.
 
+19. **The recording measures; it does not train.** A long unmonitored monologue
+    is not practice. Every error inside it is a repetition of the wrong form
+    with nothing correcting it, and repetition is how a habit gets stronger —
+    which is the likeliest reason a category can sit at goal #1 for weeks and
+    still get worse. Speaking more is not the same as improving, and this
+    workflow can measure the first while doing nothing about the second.
+
+    Budget the two separately:
+
+    - **Recording** is the instrument. Roughly two a week keeps the trend
+      honest. More recordings do not make the measurement better; they mostly
+      consume the time the treatment needed.
+    - **Corrected repetitions** are the treatment. Two channels exist:
+      Conversation Practice Mode, where every sentence is corrected within
+      seconds, and spoken drills (`python -m voxlib.drill`, step 4b), where one
+      frame is produced against a known answer key.
+
+    When writing the action plan, compare the two counts since the last session
+    and say plainly if the practice side is the smaller one. Five things to
+    notice while speaking, recommended into a week that contained no corrected
+    repetitions, is a report describing the problem for a second time.
+
+20. **One target goes into the next recording, not five.** `Current Priorities`
+    and the action plan are the *analysis*, and five entries there is correct.
+    `Focus For Next Recording` is what a person carries into live speech, and
+    at conversational speed the number of things anyone can consciously monitor
+    is one. A list of five is a list of zero.
+
+    So that section (step 6b) takes the shape:
+
+    - **One primary target** — the frame being made automatic this week, named
+      as narrowly as the drill that trains it, with the drill command next to
+      it.
+    - **At most two background reminders** — one line each, no drill, no
+      exercises. These are being watched, not worked on.
+    - Everything else stays tracked in `mistakes.csv` and unmentioned here.
+
+    The primary target should usually be a `clarity`-tier item or a stalled
+    priority, and it stays the same target for at least two sessions — a frame
+    swapped every session never reaches automaticity, which is the one thing
+    this whole loop is for.
+
 # Workflow: when asked to analyze a new recording
 
 ## 1. Get a fresh transcript
@@ -360,6 +402,61 @@ columns come back blank by design — the sounds were stripped before they could
 be counted. Note in the session report that filler tracking wasn't possible
 for this recording (`words_per_minute` is still valid).
 
+## 4b. Read the drill history
+
+```bash
+python -m voxlib.drill                          # accuracy and pace per attempt, oldest first
+python -m voxlib.drill list                     # what drills exist, and the category each trains
+python -m voxlib.drill items <drill-name>       # which prompts keep failing
+```
+
+A drill is N fixed prompts spoken out loud and scored against a known answer
+key, so it is **the only measurement here with a denominator**. Everything in
+`mistakes.csv` is a numerator: so many errors in so many words, with no way to
+know out of how many opportunities. That matters more than it sounds — a
+speaker who moves from short conversational turns to a long monologue produces
+far more noun phrases per hundred words, so an article error *rate* can rise
+while accuracy improves, and the two readings are indistinguishable in that
+series. A drill score cannot drift that way: 19/20 and 12/20 mean the same
+thing in any session.
+
+So when a drill exists for a tracked category, **report its accuracy trend
+alongside that category's rate**, and where the two disagree, say so and trust
+the drill for accuracy and the rate for how often the structure is being
+attempted in free speech. They answer different questions: the drill says
+whether the form is known under pressure, the rate says whether it survives
+into unmonitored speech. A category that scores well in drills and still
+appears in recordings is not misunderstood — it is not yet automatic, and the
+fix is volume, not explanation.
+
+Four columns are instructions rather than decoration:
+
+- **`Pace`** — median seconds per item, thinking pause included. Report it next
+  to accuracy and never instead of it: the same score at half the pause is the
+  actual progress, and a score that improves while pace worsens usually means
+  the answers are being assembled rather than produced. Blank means the drill
+  was scored from a plain transcript with no timings.
+- **`Set`** — the fingerprint of the item pool. If it changed between two rows,
+  the drill was edited, and the scores either side are different measurements —
+  say so instead of drawing one trend through both.
+- **`Mode`** — three separate series, never one. `drill` is spoken and is the
+  measurement. `typed` rows come from Conversation Practice Mode (P19) and run
+  higher by construction — time to think, no recogniser — so reading them as
+  progress in speech is exactly the mistake this column exists to prevent; what
+  they are good for is a *miss*, which is strong evidence the item isn't known.
+  `calibration` rows are the answers read aloud deliberately correctly, so their
+  misses are the instrument's error rate, not the speaker's — use them to say
+  how many misses in a real run are noise.
+- **unscorable lines** — lines excluded because the recogniser wasn't sure of
+  them. A drill where many lines were excluded is a recording problem, not a
+  result, the same way a high low-confidence word share is in step 4.
+
+`analysis/drills.csv` and `analysis/drill_items.csv` are written by
+`python -m voxlib.drill score` and read here. Never edit them by hand. If they
+don't exist yet, no drills have been run — say that in the fluency/action-plan
+sections rather than treating it as a zero, and see rule 19 about which side of
+the budget is short.
+
 ## 5. Produce the session report
 
 Write `analysis/sessions/YYYY-MM-DD.md` with the following sections, applied
@@ -400,9 +497,49 @@ vocabulary** (rule 17). If any priority is marked `!` (stalled) in
 `python -m voxlib.mistakes`, rule 18 applies — change the drill, don't repeat
 last session's goal.
 
-**Targeted practice** — generated ONLY from mistakes actually found this
-session: 3 fill-in-the-blank, 3 sentence-correction, 3 translation, 3
-rewrite exercises. Do not introduce unrelated grammar.
+**Targeted practice** — one spoken drill, and at most 3 written items.
+
+The drill is the instrument, not the written exercises. A recurring mistake at
+this level is almost always understood as a rule and still produced under time
+pressure, which is exactly the knowledge a fill-in-the-blank exercise tests and
+finds intact. Twelve written exercises a session were generating recognition
+practice for a production problem.
+
+So: pick the drill whose `category` matches this session's primary target
+(`python -m voxlib.drill list`) and name it in the report with the command to
+run it —
+
+```bash
+python -m voxlib.drill show <drill-name>     # draws a sample; say them out loud, in order, one take
+./run.sh recordings/<drill-recording> --no-diarization
+python -m voxlib.drill score <drill-name>    # scores that sample and records the attempt
+```
+
+`show` draws a sample from the pool — items missed last time first, then ones
+never seen — and writes the selection down, so `score` marks exactly the
+prompts that were read. `score` defaults to `output/lines.json` rather than the
+clean transcript, and should stay that way: lines the recogniser wasn't sure of
+are excluded from scoring instead of being counted as the speaker's mistakes,
+and the timings are what make pace measurable.
+
+Recommend a **calibration run** (`score <drill> --calibrate` on a recording of
+the answers read aloud deliberately correctly) whenever a drill is new, or when
+a score drops with no other explanation. It separates the speaker's error rate
+from the instrument's, which for articles is not a small question — an
+unstressed "a" is exactly what a recogniser drops.
+
+If no drill covers the primary target, **write one** into `drills/` following
+the format documented in `drills/README.txt`: content words only in the prompt (the speaker
+supplies the grammar), a model answer and a counter-example per item, and the
+two regexes that tell them apart. Include contrast items — cases where the
+target structure must *not* be used — or the drill teaches "always add it",
+which is the mirror-image error. The pool must be larger than one take (the
+test suite enforces it, along with checking every pattern against its own
+examples), so aim for at least twice the sample size.
+
+The written items are capped at 3, exist only for a secondary pattern with no
+drill, and are generated ONLY from mistakes actually found this session. Do not
+introduce unrelated grammar.
 
 **Session summary** — CEFR estimate; biggest strengths; biggest weaknesses;
 grammar/vocabulary/naturalness/fluency scores (0-10, per rule 14 above);
@@ -507,12 +644,17 @@ adding/updating/moving entries):
   Vocabulary Learned" items the owner clearly already uses naturally)
   rather than letting the list grow forever.
 - Append one row to "Conversation History."
-- Update "Current Priorities" and "Focus For Next Recording" based on this
-  session's action plan — rank "Current Priorities" by the `Impact` column
-  from step 6 (rule 15), not by raw occurrence count alone, and subject to
-  the tier quotas in rule 17 so the list stays a portfolio rather than a
-  ranking of one number. Any `!` entry carried over from last session must
-  come with a changed approach (rule 18), not a repeated goal.
+- Update "Current Priorities" based on this session's action plan — rank it by
+  the `Impact` column from step 6 (rule 15), not by raw occurrence count alone,
+  and subject to the tier quotas in rule 17 so the list stays a portfolio
+  rather than a ranking of one number. Any `!` entry carried over from last
+  session must come with a changed approach (rule 18), not a repeated goal.
+- Update "Focus For Next Recording" to **one** primary target plus at most two
+  background reminders (rule 20), with the drill command next to the primary.
+  This is not a shortened copy of Current Priorities: the priorities are what
+  the analysis is tracking, the focus is the single thing a person can hold in
+  mind while speaking. Keep the same primary target for at least two sessions
+  unless it has clearly become automatic.
 
 ## 7. Append to `analysis/scores_history.csv`
 
@@ -524,17 +666,18 @@ it empty if it wasn't measurable. This file is append-only — never rewrite
 past rows, even if a later session reassesses something differently; the point
 is a raw historical record for graphing later.
 
-Note the division of labour between the three CSVs:
+Note the division of labour between the history files:
 
 | File | Written by | Holds |
 |---|---|---|
 | `scores_history.csv` | you, by hand | your judgment calls — CEFR and the four 0-10 scores |
 | `mistakes.csv` | you, via `python -m voxlib.mistakes add` (step 6) | which mistakes occurred how often, per session |
 | `fluency_history.csv` | the pipeline | how the recording came out and how it was spoken |
+| `drills.csv` / `drill_items.csv` | `python -m voxlib.drill score` | drill attempts and per-item results — the only scores with a known denominator |
 
-You own the first two. `fluency_history.csv` you only ever read — don't edit
-or append to it by hand. All three are append-only: never rewrite a past row,
-even if a later session reassesses something differently.
+You own the first two. `fluency_history.csv` and the drill files you only ever
+read — don't edit or append to them by hand. All of them are append-only: never
+rewrite a past row, even if a later session reassesses something differently.
 
 ## 8. Report back in chat
 
@@ -554,8 +697,8 @@ Always teach through dialogue, not lists of exercises.
 
 ## Rules
 
-Numbered `P1`–`P18` on purpose. The `P` is what carries the distinction, not
-the number: "General rules" now also run `1`–`18` above, so a bare "rule 17"
+Numbered `P1`–`P20` on purpose. The `P` is what carries the distinction, not
+the number: "General rules" now also run `1`–`20` above, so a bare "rule 17"
 would be ambiguous and every reference in this file must keep its prefix. The
 two rule sets are never mixed (see "Modes in this repo"), but the numbers must
 stay unambiguous even in a long context.
@@ -631,10 +774,11 @@ At the start of every practice session, before the first question:
 P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
      Priorities`, `Persistent Grammar Mistakes`, `Focus For Next
      Recording`, `Vocabulary To Replace`, `Useful Vocabulary Learned`) and
-     `analysis/conversation_focus_log.md` (see structure above). If either
-     is missing or unreadable, say nothing and fall back to normal topic
-     selection (P10) and a B1+ starting difficulty (P8) — never block on
-     this.
+     `analysis/conversation_focus_log.md` (see structure above), and run
+     `python -m voxlib.drill list` to see which categories have a drill. If
+     any of these is missing or unreadable, say nothing and fall back to
+     normal topic selection (P10) and a B1+ starting difficulty (P8) —
+     never block on this.
 P15. Pick ONE focus grammar pattern for the session:
      - If `Persistent Grammar Mistakes` has no entries yet (common in the
        first few sessions — a mistake only becomes "persistent" after
@@ -672,6 +816,8 @@ P15. Pick ONE focus grammar pattern for the session:
        Occasionally (not every session), also work in one item from
        `Useful Vocabulary Learned` to check retention — no tracking
        needed, use judgment.
+     - If the chosen category has a drill, the session opens with it —
+       see P19.
 P16. If a grammar pattern was found via P15, state the session's focus in
      one short line as part of the first message, e.g. "Today's focus:
      article errors." This is a pointer, not theory — it doesn't violate
@@ -694,6 +840,54 @@ P18. At the end of the session, update (or create)
        needs re-checking soon, not a longer gap.
      Skip this step if P15 fell back to normal topic selection — there's
      no formal pattern to log.
+
+     A miss in the P19 drill block counts as "produced an error this
+     session" for the streak, the same as one made mid-conversation. It is
+     the same pattern failing, under an easier condition.
+
+P19. If the session's focus category has a drill (its `category:` matches the
+     `## <Mistake Name>` heading exactly), **open the session with it**:
+
+     ```bash
+     python -m voxlib.drill next "<drill-name>"        # 5 prompts, hardest first
+     ```
+
+     Ask them one at a time under P1–P6, exactly like any other question —
+     correction, one-line why, next prompt. Then move into normal
+     conversation for the rest of the session; the block is a warm-up that
+     puts the pattern in front of them, not the session.
+
+     The command prints prompts and deliberately withholds the model
+     answers, because its output is visible to the person answering. Correct
+     from your own knowledge of English, not from an answer key on screen.
+
+     At the end, write their answers to a scratch file, one per line in the
+     order asked, and record the attempt:
+
+     ```bash
+     python -m voxlib.drill score "<drill-name>" --typed --transcript <file>
+     ```
+
+     `--typed` is not optional. A typed answer is produced with time to think
+     and no recogniser in the way, which makes it reliably easier than the
+     same item spoken; recording it as an ordinary run would let a week of
+     typing read as progress in speech. The two are kept as separate series
+     and a typed hit never retires an item from the spoken drill — only a
+     typed *miss* counts, and it counts as a miss.
+
+     If the category has no drill, skip this entirely and run the session as
+     a normal conversation. Do not invent prompts and score them by hand:
+     an unscored improvised block is the fill-in-the-blank exercise this was
+     built to replace.
+P20. An item missed in a **spoken** drill must come back in conversation
+     in different words, never as the same sentence. Re-asking the sentence
+     verbatim trains the answer; the point is the frame, and the only proof
+     it transferred is producing it somewhere the wording is new. Take the
+     failing prompts from `python -m voxlib.drill items "<drill-name>"`,
+     then build ordinary questions that make that frame necessary — ask
+     what someone's job is rather than asking for "she / teacher" again.
+     Nothing to log for this: it is how the conversation is steered, not a
+     separate exercise.
 
 ## Goal
 
@@ -789,7 +983,17 @@ Total occurrences before improving:
 
 # Focus For Next Recording
 
-Only 3-5 concrete speaking goals.
+One primary target (rule 20), with the drill that trains it, plus at most two
+background reminders. Not a list of five goals — at speaking speed that is a
+list of none.
+
+## Primary target
+<the frame, named as narrowly as the drill>
+Drill: `python -m voxlib.drill show <name>`
+
+## Background (watching, not working on)
+-
+-
 ```
 
 If `analysis/memory.md` doesn't exist yet, create it from this structure —
@@ -800,6 +1004,14 @@ don't invent a different layout.
 ```
 recordings/            raw audio/video files (owner drops files here)
 voice_reference/       my_reference.wav — PERMANENT, not overwritten by runs
+drills/                one YAML per spoken drill: the prompts, a model answer and a
+                         counter-example per item, and the patterns that score them.
+                         PERSONAL DATA and gitignored — the prompts are reconstructions
+                         of the owner's own sentences, and every user's drills are
+                         built from their own mistakes. See drills/README.txt for the
+                         format; write a new one whenever a primary target has no
+                         drill (step 5). An invented example lives in
+                         tests/fixtures/drills/.
 output/                 all overwritten on every run:
   transcript_clean.txt      just the lines, one per line
   transcript_annotated.txt  timestamps, source file, [?] markers — for reading by eye
@@ -818,6 +1030,15 @@ analysis/
   fluency_history.csv    append-only, written by the PIPELINE, never by hand: filler rate,
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.
+  drills.csv             append-only, written by `python -m voxlib.drill score`: one row
+                           per drill attempt — items, attempted, correct, pace, the pool's
+                           fingerprint and whether it was a calibration run. The only score
+                           here with a denominator. Read it in step 4b; don't edit it.
+  drill_items.csv        append-only, same writer: one row per item per attempt, so
+                           "which prompt keeps failing" is answerable and the next sample
+                           can lead with it. Read via `python -m voxlib.drill items`.
+  drill_pending.json     the sample `drill show` last handed out, waiting to be scored.
+                           Machine state, cleared automatically; don't edit it.
   processed.json         written by the PIPELINE: which recordings have already been
                            transcribed (matched by content, not filename). Guards against
                            merging the same audio into two sessions. Don't edit it.

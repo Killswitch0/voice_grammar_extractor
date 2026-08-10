@@ -1,0 +1,120 @@
+# A test fixture, not a real drill.
+#
+# The drills a person actually uses are built from their own recorded mistakes,
+# which makes them personal data — `drills/` is gitignored for that reason. The
+# engine still needs something committed to test itself against, so this file
+# holds invented, textbook-level content that belongs to nobody.
+name: a-or-an
+category: Test Article Choice
+target: '"a" or "an" before a common noun'
+instructions: |
+  Invented content. Say each sentence out loud, in order.
+
+items:
+  - prompt: I have / apple
+    example: I have an apple.
+    wrong: I have a apple.
+    attempted: \bi have\s+(a\s+|an\s+)?apple\b
+    correct: \bi have\s+an\s+apple\b
+
+  - prompt: she has / umbrella
+    example: She has an umbrella.
+    wrong: She has a umbrella.
+    attempted: \bshe has\s+(a\s+|an\s+)?umbrella\b
+    correct: \bshe has\s+an\s+umbrella\b
+
+  - prompt: he has / book
+    example: He has a book.
+    wrong: He has an book.
+    attempted: \bhe has\s+(a\s+|an\s+)?book\b
+    correct: \bhe has\s+a\s+book\b
+
+  - prompt: we waited / hour
+    example: We waited an hour.
+    wrong: We waited a hour.
+    attempted: \bwe waited\s+(a\s+|an\s+)?hour\b
+    correct: \bwe waited\s+an\s+hour\b
+
+  - prompt: they have / house
+    example: They have a house.
+    wrong: They have an house.
+    attempted: \bthey have\s+(a\s+|an\s+)?house\b
+    correct: \bthey have\s+a\s+house\b
+
+  - prompt: I need / answer
+    example: I need an answer.
+    wrong: I need a answer.
+    attempted: \bi need\s+(a\s+|an\s+)?answer\b
+    correct: \bi need\s+an\s+answer\b
+
+  - prompt: she wants / orange
+    example: She wants an orange.
+    wrong: She wants a orange.
+    attempted: \bshe wants\s+(a\s+|an\s+)?orange\b
+    correct: \bshe wants\s+an\s+orange\b
+
+  - prompt: he bought / car
+    example: He bought a car.
+    wrong: He bought an car.
+    attempted: \bhe bought\s+(a\s+|an\s+)?car\b
+    correct: \bhe bought\s+a\s+car\b
+
+  - prompt: we saw / elephant
+    example: We saw an elephant.
+    wrong: We saw a elephant.
+    attempted: \bwe saw\s+(a\s+|an\s+)?elephant\b
+    correct: \bwe saw\s+an\s+elephant\b
+
+  - prompt: I read / article
+    example: I read an article.
+    wrong: I read a article.
+    attempted: \bi read\s+(a\s+|an\s+)?article\b
+    correct: \bi read\s+an\s+article\b
+
+  - prompt: she took / photo
+    example: She took a photo.
+    wrong: She took an photo.
+    attempted: \bshe took\s+(a\s+|an\s+)?photo\b
+    correct: \bshe took\s+a\s+photo\b
+
+  - prompt: he told / story
+    example: He told a story.
+    wrong: He told an story.
+    attempted: \bhe told\s+(a\s+|an\s+)?story\b
+    correct: \bhe told\s+a\s+story\b
+
+  - prompt: I ate / egg
+    example: I ate an egg.
+    wrong: I ate a egg.
+    attempted: \bi ate\s+(a\s+|an\s+)?egg\b
+    correct: \bi ate\s+an\s+egg\b
+
+  - prompt: they built / bridge
+    example: They built a bridge.
+    wrong: They built an bridge.
+    attempted: \bthey built\s+(a\s+|an\s+)?bridge\b
+    correct: \bthey built\s+a\s+bridge\b
+
+  - prompt: we watched / film
+    example: We watched a film.
+    wrong: We watched an film.
+    attempted: \bwe watched\s+(a\s+|an\s+)?film\b
+    correct: \bwe watched\s+a\s+film\b
+
+  - prompt: she opened / envelope
+    example: She opened an envelope.
+    wrong: She opened a envelope.
+    attempted: \bshe opened\s+(a\s+|an\s+)?envelope\b
+    correct: \bshe opened\s+an\s+envelope\b
+
+  - prompt: he wants / ticket
+    example: He wants a ticket.
+    wrong: He wants an ticket.
+    attempted: \bhe wants\s+(a\s+|an\s+)?ticket\b
+    correct: \bhe wants\s+a\s+ticket\b
+
+  - prompt: I found / idea
+    example: I found an idea.
+    wrong: I found a idea.
+    attempted: \bi found\s+(a\s+|an\s+)?idea\b
+    correct: \bi found\s+an\s+idea\b
