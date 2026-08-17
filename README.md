@@ -435,10 +435,19 @@ Each prompt gives the content words only — you supply the grammar:
 Open this folder in Claude Code and say **"let's practice"**.
 
 That's the whole thing. Claude picks the pattern you're currently worst at, opens
-with about five drill prompts one at a time, corrects each answer, weaves the
-same structure back into the conversation afterwards, and records the score. You
-don't run anything, and there is nothing to record — drills live in the dialogue,
-recordings stay for free speech and the long-term trend.
+with about five drill prompts one at a time, weaves the same structure back into
+the conversation afterwards, and records the score. You don't run anything, and
+there is nothing to record — drills live in the dialogue, recordings stay for
+free speech and the long-term trend.
+
+What happens to a wrong answer is the part that matters. You get the error
+pointed at, not fixed: the fragment quoted back with one hint, so the repair is
+yours. Then, once the form is right, you build another sentence with the same
+structure and different words — reading a correction back is recognition, and
+recognition is the half that already works. Expect a couple of long answers per
+session too (six sentences or more, corrected as a whole rather than line by
+line), and two or three words banned for the session with replacements to use
+instead.
 
 Prompts lead with whatever you missed last time, then whatever you haven't seen,
 so a pool of thirty-odd items never turns into a memorised list of five.
