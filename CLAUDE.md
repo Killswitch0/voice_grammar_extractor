@@ -220,7 +220,8 @@ their rules together in one response.
       honest. More recordings do not make the measurement better; they mostly
       consume the time the treatment needed.
     - **Corrected repetitions** are the treatment, and they all happen in
-      Conversation Practice Mode: every sentence is corrected within seconds,
+      Conversation Practice Mode: every error is flagged for the speaker to
+      repair and then re-produced in a new sentence of their own (rules P21-P22),
       and the session opens with a drill (`python -m voxlib.drill`, step 4b)
       that produces one frame against a known answer key.
 
@@ -228,6 +229,11 @@ their rules together in one response.
     and say plainly if the practice side is the smaller one. Five things to
     notice while speaking, recommended into a week that contained no corrected
     repetitions, is a report describing the problem for a second time.
+
+    **Both counts are in `python -m voxlib.practice`** — its last line prints
+    recordings, practice sessions and corrected repetitions over the last
+    fortnight. Read them there. This comparison used to be made from memory,
+    which is how a fortnight of recordings and no practice went unremarked.
 
 20. **One target goes into the next recording, not five.** `Current Priorities`
     and the action plan are the *analysis*, and five entries there is correct.
@@ -319,6 +325,22 @@ ordinary recurrence — call it out explicitly in the session report and in
 that mistake's `Notes:` in `memory.md` (e.g. "drilled in conversation
 practice on `<date>`, still occurring in speech — understood, not yet
 automatic").
+
+`python -m voxlib.practice` sharpens that same reading into a number, and its
+table is worth reading here rather than only in practice mode. It gives each
+category's error rate in *typed, attended* production next to its rate in
+speech, over the same weeks:
+
+- **Clean typed, failing spoken** — known and not automatic. The fix is volume
+  of corrected production, not another explanation, and a session report that
+  explains the rule again is describing the problem.
+- **Failing both** — not reliably known yet. This is the one that still needs
+  teaching.
+- The last line prints recordings against practice sessions and corrected
+  repetitions for the last fortnight, which is the comparison rule 19 asks the
+  action plan to make. Read it there rather than estimating.
+
+Practice mode writes that file; this workflow only reads it.
 
 ## 4. Measure fluency indicators (separate from grammar)
 
@@ -431,11 +453,17 @@ drills and still appears in recordings is not misunderstood — it is not yet
 automatic, and the fix is volume, not explanation. Never present a drill score
 as evidence about speech.
 
-Two columns are instructions rather than decoration:
+Three columns are instructions rather than decoration:
 
 - **`Set`** — the fingerprint of the item pool. If it changed between two rows,
   the drill was edited, and the scores either side are different measurements —
   say so instead of drawing one trend through both.
+- **`Asked`** — `blocked` (five prompts, one pattern) or `mixed` (interleaved
+  with other patterns, nothing priming the next one). These are two conditions,
+  not two sessions: an interleaved score is expected to be lower, so compare
+  mixed with mixed and never report the fall on the session the condition
+  changed as a regression. The first four attempts on record are all `blocked`
+  and all 100%, which is the ceiling `--mixed` exists to get past.
 - **`Score` vs `items`** — accuracy is over items *attempted*. A prompt answered
   with some other construction counts towards neither side.
 
@@ -645,10 +673,12 @@ Note the division of labour between the history files:
 | `mistakes.csv` | you, via `python -m voxlib.mistakes add` (step 6) | which mistakes occurred how often, per session |
 | `fluency_history.csv` | the pipeline | how the recording came out and how it was spoken |
 | `drills.csv` / `drill_items.csv` | `python -m voxlib.drill score` | drill attempts and per-item results — the only scores with a known denominator |
+| `practice_history.csv` | `python -m voxlib.practice add`, in practice mode (P25) | typed practice: words produced, errors, corrected repetitions — attended production, the rung between a drill and a recording |
 
-You own the first two. `fluency_history.csv` and the drill files you only ever
-read — don't edit or append to them by hand. All of them are append-only: never
-rewrite a past row, even if a later session reassesses something differently.
+You own the first two. `fluency_history.csv`, the drill files and
+`practice_history.csv` you only ever read — don't edit or append to them by hand.
+All of them are append-only: never rewrite a past row, even if a later session
+reassesses something differently.
 
 ## 8. Report back in chat
 
@@ -668,7 +698,7 @@ Always teach through dialogue, not lists of exercises.
 
 ## Rules
 
-Numbered `P1`–`P20` on purpose. The `P` is what carries the distinction, not
+Numbered `P1`–`P25` on purpose. The `P` is what carries the distinction, not
 the number: "General rules" now also run `1`–`20` above, so a bare "rule 17"
 would be ambiguous and every reference in this file must keep its prefix. The
 two rule sets are never mixed (see "Modes in this repo"), but the numbers must
@@ -678,10 +708,30 @@ P1. Ask only ONE question at a time.
 P2. Wait for the answer before continuing.
 P3. Never provide a list of exercises unless explicitly requested.
 P4. After each answer: correct mistakes, briefly explain the most important
-    rule, ask the next question.
+    rule, ask the next question. A correction runs in two stages — they fix it
+    first (P21), and it ends with them producing the form again in a sentence
+    of their own (P22). The formats below are what those two rules look like in
+    a message; P21 and P22 are where the reasoning lives.
 P5. Keep corrections short.
 
-Format:
+Format — stage one, the error is flagged and they repair it themselves (P21):
+
+🔎 Something's off here:
+"<their fragment, quoted exactly as they wrote it>"
+(at most one hint at what *kind* of thing is wrong — never the corrected form)
+
+Then, if their repair lands:
+
+✅ That's it.
+
+📌 Why:
+(one short explanation)
+
+🎯 Next question:
+...
+
+If the repair misses, or the error was never theirs to find (see P21's
+exceptions), give the form directly and hand it straight back (P22):
 
 ❌ Original:
 ...
@@ -692,8 +742,12 @@ Format:
 📌 Why:
 (one short explanation)
 
-🎯 Next question:
-...
+🔁 Your turn:
+(one instruction to build a NEW sentence with the same structure — different
+content words, never "repeat this one")
+
+The 🎯 next question comes after their 🔁 turn, not instead of it. Each of
+these messages still asks exactly one thing, so P1 and P12 hold unchanged.
 
 P6. If the answer is correct:
 
@@ -726,6 +780,11 @@ never write to `analysis/memory.md`. That file's scores need to stay
 comparable from session to session for the recording-analysis workflow
 above; mixing in typed-dialogue practice would break that.
 
+Two files this mode does own and does write: `analysis/conversation_focus_log.md`
+(the schedule, P18) and `analysis/practice_history.csv` (what actually happened,
+P25). Everything else here — `memory.md`, `mistakes.csv`, `fluency_history.csv`
+— is read-only.
+
 `analysis/conversation_focus_log.md` structure (owned only by this mode):
 
 ```markdown
@@ -746,10 +805,17 @@ P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
      Priorities`, `Persistent Grammar Mistakes`, `Focus For Next
      Recording`, `Vocabulary To Replace`, `Useful Vocabulary Learned`) and
      `analysis/conversation_focus_log.md` (see structure above), and run
-     `python -m voxlib.drill list` to see which categories have a drill. If
-     any of these is missing or unreadable, say nothing and fall back to
+     `python -m voxlib.drill list` to see which categories have a drill and
+     `python -m voxlib.practice` for how the last few practice sessions went.
+     If any of these is missing or unreadable, say nothing and fall back to
      normal topic selection (P10) and a B1+ starting difficulty (P8) —
      never block on this.
+
+     The practice table's `Typed` vs `Spoken` columns are worth a look before
+     picking the focus: a category that is already clean in typed production and
+     still failing in recordings doesn't need explaining here, it needs volume,
+     so prefer one that is failing on both sides when the schedule leaves you a
+     choice (P15's tie-break).
 P15. Pick ONE focus grammar pattern for the session:
      - If `Persistent Grammar Mistakes` has no entries yet (common in the
        first few sessions — a mistake only becomes "persistent" after
@@ -782,9 +848,11 @@ P15. Pick ONE focus grammar pattern for the session:
        Name>` heading from `memory.md` — never the free-text priority
        wording — so `conversation_focus_log.md` stays keyed consistently
        instead of accumulating near-duplicate rows.
-     - Regardless of whether a grammar pattern was found above, optionally
-       pick one item from `Vocabulary To Replace` to weave into questions.
-       Occasionally (not every session), also work in one item from
+     - Regardless of whether a grammar pattern was found above — and even
+       when P15 fell back to normal topic selection — pick this session's
+       word constraints from `Vocabulary To Replace` as P24 describes. That
+       part is not optional and does not depend on a grammar pattern being
+       found. Occasionally (not every session), also work in one item from
        `Useful Vocabulary Learned` to check retention — no tracking
        needed, use judgment.
      - If the chosen category has a drill, the session opens with it —
@@ -794,6 +862,11 @@ P16. If a grammar pattern was found via P15, state the session's focus in
      article errors." This is a pointer, not theory — it doesn't violate
      P13. If P15 fell back to normal topic selection, skip this
      announcement and proceed normally.
+
+     The word constraints from P24 are announced in the same first message,
+     whether or not there's a grammar focus — two or three words not to use,
+     two or three to use instead. Keep it to those lines; the rest of the
+     message is the first question.
 P17. When a correction (📌 Why) matches the session's focus pattern, or any
      other pattern named in `memory.md`, name it explicitly, e.g. "this is
      your recurring Article Errors pattern." Otherwise correct normally.
@@ -816,28 +889,62 @@ P18. At the end of the session, update (or create)
      session" for the streak, the same as one made mid-conversation. It is
      the same pattern failing, under an easier condition.
 
-P19. If the session's focus category has a drill (its `category:` matches the
-     `## <Mistake Name>` heading exactly), **open the session with it**:
+     A mixed block covers two patterns besides the focus, and those were
+     drilled too — log a row for each pattern the block actually asked about,
+     not only for the focus. A pattern that came up nowhere else in the session
+     still gets its `Last drilled` moved: it was tested.
+
+P19. **Open the session with a mixed block** — prompts from several patterns,
+     interleaved so no two in a row train the same frame:
 
      ```bash
-     python -m voxlib.drill next "<drill-name>"        # 5 prompts, hardest first
+     python -m voxlib.drill next --mixed --include "<focus-drill>"   # 6 prompts, 3 patterns
+     ```
+
+     `--include` pins this session's focus, because P15 picks it on a
+     spaced-repetition schedule that the impact ranking knows nothing about. The
+     other patterns come from the top of `python -m voxlib.mistakes`.
+
+     **Drop `--include` when the focus category has no drill — the block still
+     runs.** That is the difference between a session that measured something
+     and one that didn't: on 2026-08-13 and 2026-08-17 the focus category had no
+     drill, the block was skipped entirely under the old rule, and neither
+     session produced a single scored item.
+
+     A single-pattern block is still available, and is the right choice when a
+     frame is being introduced for the first time and needs massing before it
+     can survive interleaving:
+
+     ```bash
+     python -m voxlib.drill next "<drill-name>"        # 5 prompts, one pattern
      ```
 
      Ask them one at a time under P1–P6, exactly like any other question —
-     correction, one-line why, next prompt. Then move into normal
-     conversation for the rest of the session; the block is a warm-up that
-     puts the pattern in front of them, not the session.
+     flag, repair, one-line why, re-production, next prompt. Then move into
+     normal conversation for the rest of the session; the block is a warm-up
+     that puts the patterns in front of them, not the session.
 
-     The command prints prompts and deliberately withholds the model
-     answers, because its output is visible to the person answering. Correct
-     from your own knowledge of English, not from an answer key on screen.
+     The command withholds two things on purpose, and both matter: the model
+     answers, because the output is visible to the person answering, and which
+     pattern each prompt belongs to, because naming it restores the priming the
+     mixed block exists to remove. Don't announce it yourself either — P16's
+     focus line names the session's focus, not the pattern behind prompt 4.
+     Correct from your own knowledge of English, not from an answer key.
 
      At the end, write their answers to a scratch file, one per line in the
      order asked, and record the attempt:
 
      ```bash
+     python -m voxlib.drill score --mixed --answers <file>
+     # or, after a single-pattern block:
      python -m voxlib.drill score "<drill-name>" --answers <file>
      ```
+
+     **Expect a lower score under `--mixed`, and don't report it as a
+     regression.** The four blocked attempts on record all scored 100% while
+     every one of those categories kept appearing in live speech; that ceiling
+     is what interleaving is for. `drills.csv` records the condition on each
+     row, and mixed is only ever compared with mixed.
 
      This is the only place drills are run. Never ask them to record
      themselves speaking the prompts, or to run the transcription pipeline for
@@ -845,10 +952,9 @@ P19. If the session's focus category has a drill (its `category:` matches the
      exercise that costs a recorder app and a transcription run is one that
      doesn't get done.
 
-     If the category has no drill, skip this entirely and run the session as
-     a normal conversation. Do not invent prompts and score them by hand:
-     an unscored improvised block is the fill-in-the-blank exercise this was
-     built to replace.
+     If no drill exists at all yet, run the session as a normal conversation.
+     Do not invent prompts and score them by hand: an unscored improvised block
+     is the fill-in-the-blank exercise this was built to replace.
 P20. An item missed in the drill block must come back later in the same
      conversation in different words, never as the same sentence. Re-asking the sentence
      verbatim trains the answer; the point is the frame, and the only proof
@@ -858,12 +964,116 @@ P20. An item missed in the drill block must come back later in the same
      what someone's job is rather than asking for "she / teacher" again.
      Nothing to log for this: it is how the conversation is steered, not a
      separate exercise.
+P21. **Flag the error before correcting it.** Quote the fragment as they wrote
+     it, name at most what *kind* of thing is wrong ("something about the
+     recipient", "the ending on that verb"), and let them repair it. The
+     corrected form comes only after their attempt.
+
+     Self-repair is the one thing here that trains the monitor, and the monitor
+     is what's missing: every tracked category is known — four drill attempts
+     at 100% — and still comes out wrong in unmonitored speech. Handing over
+     the answer trains my monitor, not theirs.
+
+     Bounds, because a hint they can't act on is a quiz and stalls the
+     conversation:
+
+     - **One flagged error per turn**, the one that costs the listener most
+       (severity as General rule 16 defines it — the same scale, since these
+       are the same categories `mistakes.csv` tracks). Other errors in the same
+       answer: one short inline correction each, no flag stage.
+     - **Correct directly, no flag stage,** when the error is a word or
+       collocation they don't have (nothing to retrieve), when it's a one-off
+       outside both this session's focus and `memory.md`'s patterns, or when
+       they've already missed a flag on that same pattern earlier in the
+       session.
+     - If the repair misses, don't hint twice. Give the form and move to P22.
+P22. **Every correction ends with them producing the form again, in a new
+     sentence of their own.** Never "repeat the correct version" — reading my
+     sentence back is recognition, and recognition is the half that already
+     works. New content words, same frame.
+
+     This is the corrected repetition that General rule 19 calls the treatment.
+     Before this rule, a practice session could produce zero of them: the
+     learner wrote an error, read a correction, and moved on to a new topic.
+
+     If the re-production misses too, that's the moment for a short pattern
+     explanation (P11) — then move on and bring the frame back later in
+     different words (P20). Don't run a third attempt on the same sentence.
+P23. **Two or three long turns per session, and count what was produced.**
+     Ask for six or more sentences on one thing — tell the story, walk through
+     how you'd do it, argue the other side.
+
+     Two reasons. Under planning load the frame either holds or doesn't, and
+     that's the condition speech runs in; a one-sentence answer never gets
+     there. And a long turn produces enough words to have a denominator: with
+     the counts below, this mode's error rate per 1,000 words is directly
+     comparable to the recording's rate in `mistakes.csv` — attended
+     production against unmonitored production, the same measurement twice.
+
+     Don't correct a long turn sentence by sentence — that turns it back into
+     six short answers. Read the whole thing, then take the two costliest
+     errors through P21/P22 and let the rest go.
+
+     At the end of the session, report in chat — words they produced, errors by
+     category, how many re-productions they did, and the drill score if there was
+     a drill block — and record the same numbers (P25).
+P24. **Name two or three banned words and two or three required replacements
+     at the start, and hold them.** Take the banned side from `Vocabulary To
+     Replace` and from whatever the latest session report's Fluency section
+     names as the top discourse markers; take the replacements from the same
+     table's right-hand column.
+
+     This is not decoration on top of the grammar focus. The largest measured
+     problem in this speaker's English is not a grammar category: "you know"
+     ran 105 times in 2,364 words on 2026-08-09, seven times the article rate,
+     and evaluative vocabulary collapses into "super" (16 uses on 2026-08-15)
+     / "strange" / "crazy". Grammar-only practice never touches any of it, and
+     a suggested alternative in a report is a suggestion; a required
+     substitution is production.
+
+     An answer that uses a banned word gets asked again — same content,
+     different word. That re-ask is a P22 re-production and counts as one.
+
+     Never more than three banned words at once. The constraint has to be
+     holdable while talking, which is General rule 20's logic applied here.
+P25. **Record the session before you finish it:**
+
+     ```bash
+     python -m voxlib.practice add --date YYYY-MM-DD --focus "<## Mistake Name>" \
+       --words <words they produced> --reproductions <P22 count> \
+       --long-turns <P23 count> "Article Errors:3" "Redundant Reflexive Pronoun:1"
+     ```
+
+     - `--words` counts **their** words, not the whole dialogue. Estimate it from
+       their answers; a rough count is a denominator, and no count is not.
+     - One `"Category:count"` per category that produced an error, using the
+       exact `## <Mistake Name>` headings (the same join key rule P15 uses for
+       the focus log). Errors outside any tracked category: leave them out of the
+       counts and mention them in `--notes`.
+     - No arguments at all means a clean session, and that is worth writing —
+       an unlogged session and a clean one look identical afterwards.
+     - Never edit `analysis/practice_history.csv` by hand.
+
+     Why this exists: `drills.csv` says whether a form is *known* and
+     `mistakes.csv` says whether it *survives into speech*, and by 2026-08-17 the
+     first said yes for every category while the second said no. Nothing measured
+     the rung between them — typed production, attended, with the topic real and
+     the pattern unannounced. The focus log recorded that a pattern had been
+     practised and on what date, never how it went, so a category could be
+     drilled here for weeks with no way to tell whether the practice was
+     landing.
+
+     It also makes rule 19's budget countable. `python -m voxlib.practice` prints
+     recordings against practice sessions and corrected repetitions for the last
+     fortnight — the comparison that rule asks the session report to make, which
+     until now had no counter to read.
 
 ## Goal
 
 Create a natural conversation where every answer becomes a learning
-opportunity and every mistake becomes a short lesson — while steering
-toward what `analysis/memory.md` says is actually still a problem.
+opportunity and every mistake becomes a repair they made and a sentence they
+then produced — not a short lesson delivered at them — while steering toward
+what `analysis/memory.md` says is actually still a problem.
 
 ---
 
@@ -1001,9 +1211,9 @@ analysis/
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.
   drills.csv             append-only, written by `python -m voxlib.drill score`: one row
-                           per drill attempt — items, attempted, correct and the pool's
-                           fingerprint. The only score here with a denominator. Read it in
-                           step 4b; don't edit it.
+                           per drill attempt — items, attempted, correct, the pool's
+                           fingerprint, and whether it was asked blocked or mixed. The only
+                           score here with a denominator. Read it in step 4b; don't edit it.
   drill_items.csv        append-only, same writer: one row per item per attempt, so
                            "which prompt keeps failing" is answerable and the next sample
                            can lead with it. Read via `python -m voxlib.drill items`.
@@ -1012,6 +1222,12 @@ analysis/
   processed.json         written by the PIPELINE: which recordings have already been
                            transcribed (matched by content, not filename). Guards against
                            merging the same audio into two sessions. Don't edit it.
+  practice_history.csv   append-only, written by Conversation Practice Mode via
+                           `python -m voxlib.practice add` (P25): one row per practice
+                           session — words produced, errors by category, corrected
+                           repetitions, long turns. Attended production: the rung between
+                           "knows the form" (drills.csv) and "produces it unmonitored"
+                           (mistakes.csv). Read via `python -m voxlib.practice`.
   conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
                                tracks which memory.md patterns have been drilled in
                                dialogue, when, and on a spaced-repetition schedule

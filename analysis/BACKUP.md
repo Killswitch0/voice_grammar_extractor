@@ -51,11 +51,12 @@ git config user.email "<your-personal-email>"
 ## 4. Decide what to actually back up
 
 Recommended: back up the **derived analysis**, not the **raw dialogue**.
-`memory.md`, `scores_history.csv`, `conversation_focus_log.md`, and the
-session reports (`sessions/*.md`) are the valuable long-term signal. The raw
-transcripts (`sessions/*.txt`, `sessions/*.annotated.txt`) are the actual
-words you said — most people are more comfortable keeping those local-only,
-even in a private repo. Add to `analysis/.gitignore`:
+`memory.md`, `scores_history.csv`, `mistakes.csv`, `practice_history.csv`,
+`conversation_focus_log.md`, and the session reports (`sessions/*.md`) are the
+valuable long-term signal. The raw transcripts (`sessions/*.txt`,
+`sessions/*.annotated.txt`) are the actual words you said — most people are more
+comfortable keeping those local-only, even in a private repo. Add to
+`analysis/.gitignore`:
 
 ```
 sessions/*.txt

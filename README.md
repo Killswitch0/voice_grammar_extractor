@@ -435,13 +435,31 @@ Each prompt gives the content words only — you supply the grammar:
 Open this folder in Claude Code and say **"let's practice"**.
 
 That's the whole thing. Claude picks the pattern you're currently worst at, opens
-with about five drill prompts one at a time, corrects each answer, weaves the
-same structure back into the conversation afterwards, and records the score. You
-don't run anything, and there is nothing to record — drills live in the dialogue,
-recordings stay for free speech and the long-term trend.
+with about five drill prompts one at a time, weaves the same structure back into
+the conversation afterwards, and records the score. You don't run anything, and
+there is nothing to record — drills live in the dialogue, recordings stay for
+free speech and the long-term trend.
+
+What happens to a wrong answer is the part that matters. You get the error
+pointed at, not fixed: the fragment quoted back with one hint, so the repair is
+yours. Then, once the form is right, you build another sentence with the same
+structure and different words — reading a correction back is recognition, and
+recognition is the half that already works. Expect a couple of long answers per
+session too (six sentences or more, corrected as a whole rather than line by
+line), and two or three words banned for the session with replacements to use
+instead.
 
 Prompts lead with whatever you missed last time, then whatever you haven't seen,
 so a pool of thirty-odd items never turns into a memorised list of five.
+
+The block is also **interleaved**: consecutive prompts come from different
+patterns, and which pattern a prompt is testing isn't shown. Five prompts in a
+row on one structure mostly measure whether it's still in your head from the
+prompt before — the first four attempts scored 100% that way while the same
+mistakes kept turning up in recordings. Mixing them means each answer has to be
+retrieved from scratch, which is the condition speech runs in, so expect lower
+scores and don't read them as a step backwards: each score records which way it
+was asked, and the two are never compared with each other.
 
 ### Reading your own history
 
@@ -451,6 +469,7 @@ You never need these, but it's your data:
 python -m voxlib.drill                                # every attempt: score and accuracy
 python -m voxlib.drill list                           # what drills you have
 python -m voxlib.drill items articles-linking-verb    # which prompts keep failing
+python -m voxlib.practice                             # practice sessions: typed vs spoken
 ```
 
 Accuracy is over items *attempted* — a prompt you answered with a different
@@ -464,6 +483,16 @@ It tells you whether you **know** the form: you answered in writing, with time t
 think and one structure in mind. It does not tell you whether the form survives
 into speech — that's what the recordings are for. A pattern you score well on and
 still get wrong in a recording isn't misunderstood; it just isn't automatic yet.
+
+`python -m voxlib.practice` is the rung between those two. Each practice session
+records how many words you produced, how many errors were in them and how many
+corrections you turned back into a sentence of your own, so a typed error rate
+per 1,000 words sits next to the spoken one from the same weeks. Worse typed than
+spoken means the pattern isn't reliably known and wants explaining; clean typed
+and failing spoken means it's known and wants volume. The same table prints how
+many recordings and how many practice sessions the last fortnight held — the
+recording measures, only the corrected repetitions train, and it's easy to do a
+lot of the first and none of the second.
 
 ### Your drills are yours
 

@@ -393,7 +393,11 @@ def _cli_paths(tmp_path: Path) -> list[str]:
     return ["--drills-dir", str(DRILLS_DIR),
             "--history", str(tmp_path / "drills.csv"),
             "--item-history", str(tmp_path / "drill_items.csv"),
-            "--pending", str(tmp_path / "pending.json")]
+            "--pending", str(tmp_path / "pending.json"),
+            # Pointed at nothing on purpose: the ranking a mixed block uses must
+            # not depend on the owner's own mistake history, which is not in the
+            # repository and differs between machines.
+            "--mistakes", str(tmp_path / "no-mistakes.csv")]
 
 
 def test_a_dry_run_scores_without_recording(tmp_path: Path):
@@ -445,3 +449,251 @@ def test_an_unknown_drill_name_lists_what_is_available(tmp_path: Path, capsys):
         drill.main(_cli_paths(tmp_path) + ["next", "nope"])
 
     assert FIXTURE_DRILL in capsys.readouterr().err
+
+
+# --- mixed blocks ------------------------------------------------------------
+#
+# Every score on record before this existed was 100%, on blocks where all five
+# prompts trained one frame. Interleaving is the attempt to measure retrieval
+# instead of what is still sitting in working memory from the prompt before.
+
+SECOND_FIXTURE = "verb-s"
+
+
+def _named_pool(name: str, category: str, n: int) -> Drill:
+    pool = _pool(n)
+    return Drill(name=name, category=category, target=pool.target,
+                 instructions=pool.instructions, items=pool.items)
+
+
+def test_a_mixed_block_never_asks_two_prompts_from_one_pattern_in_a_row():
+    """The property being bought: nothing in the previous prompt primes the next
+    one. Without it, four of five items measure short-term memory."""
+    a = _named_pool("a", "Cat A", 6)
+    b = _named_pool("b", "Cat B", 6)
+
+    chosen = drill.select_mixed([a, b], [], count=6, patterns=2)
+
+    names = [d.name for d, _ in chosen]
+    assert names == ["a", "b", "a", "b", "a", "b"]
+
+
+def test_a_mixed_block_spans_no_more_patterns_than_asked_for():
+    pools = [_named_pool(name, f"Cat {name}", 6) for name in ("a", "b", "c", "d")]
+
+    chosen = drill.select_mixed(pools, [], count=6, patterns=3)
+
+    assert {d.name for d, _ in chosen} == {"a", "b", "c"}
+    assert len(chosen) == 6
+
+
+def test_an_uneven_count_is_shared_out_from_the_front_of_the_ranking():
+    """Seven items over three patterns gives the worst-ranked pattern the extra
+    one, not the one that happens to sort first."""
+    pools = [_named_pool(name, f"Cat {name}", 6) for name in ("a", "b", "c")]
+
+    chosen = drill.select_mixed(pools, [], count=7, patterns=3)
+
+    counts = {name: sum(1 for d, _ in chosen if d.name == name) for name in ("a", "b", "c")}
+    assert counts == {"a": 3, "b": 2, "c": 2}
+
+
+def test_a_mixed_block_still_leads_each_pattern_with_what_it_missed():
+    """Interleaving changes the order prompts are asked in, not which ones are
+    due — a miss is still the first thing that pattern asks again."""
+    a = _named_pool("a", "Cat A", 6)
+    b = _named_pool("b", "Cat B", 6)
+    missed = _row(a, 4, date="2026-08-10", correct=False)
+
+    chosen = drill.select_mixed([a, b], [missed], count=2, patterns=2)
+
+    assert chosen[0][1] is a.items[4]
+
+
+def test_a_drill_with_no_items_cannot_take_a_slot_in_a_mixed_block():
+    empty = Drill(name="empty", category="Cat", target="t", instructions="", items=[])
+    real = _named_pool("real", "Cat B", 6)
+
+    chosen = drill.select_mixed([empty, real], [], count=2, patterns=2)
+
+    assert {d.name for d, _ in chosen} == {"real"}
+
+
+def _mistakes_csv(path: Path, rows: list[tuple[str, int, int]]) -> Path:
+    """`category, severity, occurrences` for one 1,000-word session."""
+    lines = ["date,category,severity,occurrences,reliable_words,source,notes"]
+    lines += [f"2026-08-10,{c},{sev},{n},1000,test," for c, sev, n in rows]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def test_patterns_enter_a_mixed_block_by_impact_not_alphabetically(tmp_path: Path):
+    quiet = _named_pool("aaa", "Quiet Category", 6)
+    loud = _named_pool("zzz", "Loud Category", 6)
+    history = _mistakes_csv(tmp_path / "mistakes.csv",
+                            [("Quiet Category", 2, 1), ("Loud Category", 4, 12)])
+
+    ranked = drill.priority_order([quiet, loud], history)
+
+    assert [d.name for d in ranked] == ["zzz", "aaa"]
+
+
+def test_a_pattern_no_mistake_history_mentions_sorts_last(tmp_path: Path):
+    known = _named_pool("known", "Loud Category", 6)
+    unknown = _named_pool("aaa", "Never Measured", 6)
+    history = _mistakes_csv(tmp_path / "mistakes.csv", [("Loud Category", 3, 5)])
+
+    ranked = drill.priority_order([unknown, known], history)
+
+    assert [d.name for d in ranked] == ["known", "aaa"]
+
+
+def test_a_missing_mistake_history_costs_the_ranking_not_the_block(tmp_path: Path):
+    pools = [_named_pool("b", "Cat B", 6), _named_pool("a", "Cat A", 6)]
+
+    ranked = drill.priority_order(pools, tmp_path / "nothing.csv")
+
+    assert [d.name for d in ranked] == ["a", "b"], "falls back to name order"
+
+
+def test_a_mixed_block_hides_which_pattern_each_prompt_tests(tmp_path: Path, capsys):
+    """The learner reads this output. Naming the pattern next to the prompt is
+    most of the answer, and it would put the priming back."""
+    drill.main(_cli_paths(tmp_path) + ["next", "--mixed", "--count", "4"])
+    out = capsys.readouterr().out
+
+    assert FIXTURE_DRILL not in out and SECOND_FIXTURE not in out
+    assert "Test Article Choice" not in out and "Test Verb Agreement" not in out
+    assert "4 prompts, 2 patterns" in out
+
+
+def test_a_mixed_block_records_the_drill_behind_every_prompt(tmp_path: Path, capsys):
+    """The answers come back as one list; without this the scoring cannot tell
+    which pattern each one belongs to."""
+    drill.main(_cli_paths(tmp_path) + ["next", "--mixed", "--count", "4"])
+    capsys.readouterr()
+
+    pending = drill.read_mixed_pending(tmp_path / "pending.json")
+
+    assert [name for name, _ in pending] == [FIXTURE_DRILL, SECOND_FIXTURE] * 2
+    assert drill.read_pending(tmp_path / "pending.json", FIXTURE_DRILL) is None, (
+        "a mixed block must not be readable as a blocked one for a single drill"
+    )
+
+
+def test_the_session_focus_can_be_pinned_into_a_mixed_block(tmp_path: Path, capsys):
+    """The focus is chosen on a spaced-repetition schedule, which the impact
+    ranking knows nothing about."""
+    history = _mistakes_csv(tmp_path / "mistakes.csv",
+                            [("Test Article Choice", 4, 20), ("Test Verb Agreement", 1, 1)])
+
+    drill.main(_cli_paths(tmp_path) + ["--mistakes", str(history), "next", "--mixed",
+                                       "--count", "2", "--patterns", "1",
+                                       "--include", SECOND_FIXTURE])
+    capsys.readouterr()
+
+    pending = drill.read_mixed_pending(tmp_path / "pending.json")
+
+    assert {name for name, _ in pending} == {SECOND_FIXTURE}
+
+
+def test_a_mixed_block_scores_as_one_row_per_pattern(tmp_path: Path, capsys):
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+    capsys.readouterr()
+    answers = tmp_path / "answers.txt"
+    answers.write_text("I have a apple.\nShe teaches English.\n", encoding="utf-8")
+
+    drill.main(paths + ["score", "--mixed", "--answers", str(answers),
+                        "--date", "2026-08-17"])
+
+    rows = drill.load_history(tmp_path / "drills.csv")
+    assert [(r.drill, r.correct, r.attempted) for r in rows] == [
+        (FIXTURE_DRILL, 0, 1), (SECOND_FIXTURE, 1, 1),
+    ]
+    assert {r.condition for r in rows} == {drill.MIXED}
+    assert {r.condition for r in drill.load_item_history(tmp_path / "drill_items.csv")} \
+        == {drill.MIXED}
+
+
+def test_scoring_a_mixed_block_clears_it(tmp_path: Path, capsys):
+    """A sample left lying around would score the next block against prompts
+    nobody was asked."""
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+    answers = tmp_path / "answers.txt"
+    answers.write_text("I have an apple.\nShe teaches English.\n", encoding="utf-8")
+    drill.main(paths + ["score", "--mixed", "--answers", str(answers)])
+    capsys.readouterr()
+
+    assert drill.read_mixed_pending(tmp_path / "pending.json") is None
+
+
+def test_a_mixed_block_cannot_be_scored_without_the_sample_it_was_drawn_from(tmp_path: Path):
+    answers = tmp_path / "answers.txt"
+    answers.write_text("I have an apple.\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        drill.main(_cli_paths(tmp_path) + ["score", "--mixed", "--answers", str(answers)])
+
+
+def test_a_drill_name_and_mixed_together_are_refused(tmp_path: Path, capsys):
+    with pytest.raises(SystemExit):
+        drill.main(_cli_paths(tmp_path) + ["next", FIXTURE_DRILL, "--mixed"])
+
+    assert "not both" in capsys.readouterr().err
+
+
+def test_a_blocked_attempt_is_still_recorded_as_blocked(tmp_path: Path):
+    history, items = tmp_path / "drills.csv", tmp_path / "drill_items.csv"
+
+    drill.record_result(history, items, date="2026-08-17",
+                        result=drill.score(_drill([_item()]), _answers("He's a fanatic.")))
+
+    assert [r.condition for r in drill.load_history(history)] == [drill.BLOCKED]
+
+
+def test_an_unknown_condition_is_refused(tmp_path: Path):
+    result = drill.score(_drill([_item()]), _answers("He's a fanatic."))
+
+    with pytest.raises(ValueError, match="condition"):
+        drill.record_result(tmp_path / "d.csv", tmp_path / "i.csv", date="2026-08-17",
+                            result=result, condition="spoken")
+
+
+def test_rows_written_before_the_condition_existed_read_as_blocked(tmp_path: Path):
+    """The history is append-only for rows, so the column had to be added to a
+    file that already held four attempts — all of them blocked."""
+    history = tmp_path / "drills.csv"
+    history.write_text(
+        "date,drill,category,fingerprint,items,attempted,correct,notes\n"
+        "2026-08-10,a-or-an,Test Article Choice,abc,5,5,5,\n",
+        encoding="utf-8")
+
+    drill.record_result(history, tmp_path / "items.csv", date="2026-08-17",
+                        result=drill.score(_drill([_item()]), _answers("He's a fanatic.")),
+                        condition=drill.MIXED)
+
+    rows = drill.load_history(history)
+    assert [r.condition for r in rows] == [drill.BLOCKED, drill.MIXED]
+    assert rows[0].correct == 5, "the old row keeps every value it had"
+
+
+def test_a_header_that_is_not_an_older_version_of_this_file_is_refused(tmp_path: Path):
+    """Padding an unrecognised file would silently shift its columns."""
+    history = tmp_path / "drills.csv"
+    history.write_text("when,what\n2026-08-10,something\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="refusing to migrate"):
+        drill._widen_header(history, drill.HISTORY_COLUMNS)
+
+
+def test_the_history_warns_when_one_drill_was_asked_under_both_conditions():
+    rows = [
+        drill.HistoryRow(date="2026-08-11", drill="d", category="c", fingerprint="aaa",
+                         items=5, attempted=5, correct=5, notes="", condition=drill.BLOCKED),
+        drill.HistoryRow(date="2026-08-17", drill="d", category="c", fingerprint="aaa",
+                         items=2, attempted=2, correct=1, notes="", condition=drill.MIXED),
+    ]
+
+    assert "both conditions" in drill.format_history(rows)
