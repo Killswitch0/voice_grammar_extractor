@@ -209,6 +209,16 @@ def test_an_empty_history_says_so_instead_of_printing_a_table(tmp_path: Path):
     assert "No practice sessions recorded yet" in practice.format_table([])
 
 
+def test_an_empty_history_still_prints_the_budget():
+    """No practice against six recordings is rule 19's signal at its loudest —
+    the one state where suppressing the line would hide the whole point."""
+    table = practice.format_table([], recording_dates=["2026-08-10", "2026-08-15"],
+                                  today="2026-08-17")
+
+    assert "2 recording(s), 0 practice session(s)" in table
+    assert "instrument is running ahead" in table
+
+
 # --- CLI ---------------------------------------------------------------------
 
 def test_the_cli_records_a_session_and_reads_it_back(tmp_path: Path, capsys):

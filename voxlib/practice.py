@@ -216,8 +216,11 @@ def format_table(sessions: list[PracticeSession], *,
                  speech_rates: Optional[dict[str, float]] = None,
                  today: Optional[str] = None) -> str:
     if not sessions:
-        return ("No practice sessions recorded yet. Say \"let's practice\" to run one — and "
-                "see general rule 19 about which side of the budget that is.")
+        # Still print the budget: "no practice sessions, six recordings" is the
+        # rule-19 signal at its loudest, and suppressing it here would hide it in
+        # exactly the state that most needs saying.
+        return ("No practice sessions recorded yet. Say \"let's practice\" to run one.\n\n"
+                + _budget_line([], recording_dates or [], today))
 
     header = (f"{'Date':<12} {'Focus':<34} {'Words':>7} {'Errors':>7} {'Per 1k':>7} "
               f"{'Repro':>6} {'Long':>5}")
