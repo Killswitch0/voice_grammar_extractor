@@ -1,0 +1,123 @@
+# A second test fixture, not a real drill.
+#
+# One drill is enough to test scoring; a mixed block needs at least two, since
+# the whole point of it is that consecutive prompts belong to different
+# patterns. Invented, textbook-level content that belongs to nobody, same as
+# a-or-an.yaml — and deliberately a different pattern, so an answer to one of
+# these prompts can never satisfy an item in that drill.
+name: verb-s
+category: Test Verb Agreement
+target: '"-s" on a present-tense verb after a singular subject — and none after a plural one'
+instructions: |
+  Invented content. Give the whole sentence for each prompt.
+
+items:
+  - prompt: she / teach / English
+    example: She teaches English.
+    wrong: She teach English.
+    attempted: \bshe\s+teach(es)?\s+english\b
+    correct: \bshe\s+teaches\s+english\b
+
+  - prompt: he / work / in a bank
+    example: He works in a bank.
+    wrong: He work in a bank.
+    attempted: \bhe\s+works?\s+in a bank\b
+    correct: \bhe\s+works\s+in a bank\b
+
+  - prompt: my brother / drive / to work
+    example: My brother drives to work.
+    wrong: My brother drive to work.
+    attempted: \bmy brother\s+drives?\s+to work\b
+    correct: \bmy brother\s+drives\s+to work\b
+
+  - prompt: the shop / open / at nine
+    example: The shop opens at nine.
+    wrong: The shop open at nine.
+    attempted: \bthe shop\s+opens?\s+at nine\b
+    correct: \bthe shop\s+opens\s+at nine\b
+
+  - prompt: she / speak / three languages
+    example: She speaks three languages.
+    wrong: She speak three languages.
+    attempted: \bshe\s+speaks?\s+three languages\b
+    correct: \bshe\s+speaks\s+three languages\b
+
+  - prompt: it / cost / too much
+    example: It costs too much.
+    wrong: It cost too much.
+    attempted: \bit\s+costs?\s+too much\b
+    correct: \bit\s+costs\s+too much\b
+
+  - prompt: my sister / live / in Berlin
+    example: My sister lives in Berlin.
+    wrong: My sister live in Berlin.
+    attempted: \bmy sister\s+lives?\s+in berlin\b
+    correct: \bmy sister\s+lives\s+in berlin\b
+
+  - prompt: he / play / the guitar
+    example: He plays the guitar.
+    wrong: He play the guitar.
+    attempted: \bhe\s+plays?\s+the guitar\b
+    correct: \bhe\s+plays\s+the guitar\b
+
+  - prompt: the train / leave / at noon
+    example: The train leaves at noon.
+    wrong: The train leave at noon.
+    attempted: \bthe train\s+leaves?\s+at noon\b
+    correct: \bthe train\s+leaves\s+at noon\b
+
+  - prompt: she / study / medicine
+    example: She studies medicine.
+    wrong: She study medicine.
+    attempted: \bshe\s+stud(y|ies)\s+medicine\b
+    correct: \bshe\s+studies\s+medicine\b
+
+  - prompt: he / need / more time
+    example: He needs more time.
+    wrong: He need more time.
+    attempted: \bhe\s+needs?\s+more time\b
+    correct: \bhe\s+needs\s+more time\b
+
+  - prompt: the dog / sleep / all day
+    example: The dog sleeps all day.
+    wrong: The dog sleep all day.
+    attempted: \bthe dog\s+sleeps?\s+all day\b
+    correct: \bthe dog\s+sleeps\s+all day\b
+
+  - prompt: my friend / write / poems
+    example: My friend writes poems.
+    wrong: My friend write poems.
+    attempted: \bmy friend\s+writes?\s+poems\b
+    correct: \bmy friend\s+writes\s+poems\b
+
+  - prompt: she / watch / the news
+    example: She watches the news.
+    wrong: She watch the news.
+    attempted: \bshe\s+watch(es)?\s+the news\b
+    correct: \bshe\s+watches\s+the news\b
+
+  - prompt: he / carry / the bags
+    example: He carries the bags.
+    wrong: He carry the bags.
+    attempted: \bhe\s+carr(y|ies)\s+the bags\b
+    correct: \bhe\s+carries\s+the bags\b
+
+  - prompt: the machine / print / slowly
+    example: The machine prints slowly.
+    wrong: The machine print slowly.
+    attempted: \bthe machine\s+prints?\s+slowly\b
+    correct: \bthe machine\s+prints\s+slowly\b
+
+  # Contrast items: the "-s" must NOT appear. A drill that only ever adds it
+  # teaches "always add it", which is the mirror-image error.
+  - prompt: my parents / live / in Rome
+    example: My parents live in Rome.
+    wrong: My parents lives in Rome.
+    attempted: \bmy parents\s+lives?\s+in rome\b
+    correct: \bmy parents\s+live\s+in rome\b
+
+  - prompt: the shops / close / at eight
+    example: The shops close at eight.
+    wrong: The shops closes at eight.
+    attempted: \bthe shops\s+closes?\s+at eight\b
+    correct: \bthe shops\s+close\s+at eight\b

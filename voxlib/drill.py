@@ -42,6 +42,23 @@ score and a new one are not the same measurement. Every attempt records a
 fingerprint of the pool it was drawn from — the pool, not the sample, since the
 sample is meant to differ every session — so the history can say "this is a
 different drill now" instead of drawing one line through both.
+
+**Blocked and interleaved are different conditions.** The first four attempts on
+record all scored 100% — 5/5, 3/3, 5/5, 4/4 — while the same categories kept
+coming out wrong in unmonitored speech. A block of five prompts that all train
+one frame explains most of that gap: after the first prompt the pattern is
+primed and sitting in working memory, so what the remaining four measure is
+whether it's still there a few seconds later. That is not the question. So a
+block can also be drawn *mixed*: items from several drills, round-robined so
+consecutive prompts belong to different patterns and none of them is announced.
+Retrieval then has to start from scratch each time, which is the condition
+speech runs in.
+
+Accuracy under the two conditions is not comparable and the point is that it
+shouldn't be — an interleaved score is expected to be lower, and a drop on the
+day the condition changes is the measurement working, not a regression. Every
+row therefore records which condition produced it, and the history refuses to
+draw one trend through both.
 """
 
 from __future__ import annotations
@@ -60,16 +77,30 @@ logger = logging.getLogger(__name__)
 
 # One row per attempt — what step 4b of the analysis workflow reads.
 HISTORY_COLUMNS = ["date", "drill", "category", "fingerprint", "items",
-                   "attempted", "correct", "notes"]
+                   "attempted", "correct", "notes", "condition"]
 
 # One row per item per attempt — what sampling reads, and the only place that
 # can answer "which item keeps failing", which is usually the actual lesson.
-ITEM_COLUMNS = ["date", "drill", "item_id", "prompt", "attempted", "correct"]
+ITEM_COLUMNS = ["date", "drill", "item_id", "prompt", "attempted", "correct",
+                "condition"]
+
+# The two conditions a block can be asked under. Rows written before the
+# distinction existed were all blocked, which is what `load_history` assumes for
+# a missing value.
+BLOCKED = "blocked"
+MIXED = "mixed"
 
 # How many items a practice session opens with. Small on purpose: the block is a
 # warm-up that puts the session's focus pattern in front of the learner, and the
 # value of the session is the conversation after it.
 DEFAULT_ITEMS = 5
+
+# A mixed block is one item longer, and spread over this many patterns. Three
+# because two alternating patterns are still guessable from the previous prompt,
+# and because a block covering five patterns stops being a warm-up for the
+# session's focus and becomes the session.
+DEFAULT_MIXED_ITEMS = 6
+MIXED_PATTERNS = 3
 
 # Punctuation is noise here, not signal — an answer typed without a full stop is
 # not a grammar mistake. Apostrophes are the exception: "he's" and "he is" are
@@ -290,6 +321,7 @@ class HistoryRow:
     attempted: int
     correct: int
     notes: str
+    condition: str = BLOCKED
 
     @property
     def accuracy(self) -> Optional[float]:
@@ -304,17 +336,55 @@ class ItemRow:
     prompt: str
     attempted: bool
     correct: bool
+    condition: str = BLOCKED
+
+
+def _widen_header(path: Path, columns: list[str]) -> None:
+    """
+    Add columns to an existing history file, padding the rows already in it.
+
+    These files are append-only in the sense that matters — no row's values are
+    ever revised — but a column added later cannot be appended around: writing
+    nine fields under an eight-field header shifts every value in the new rows
+    one place left, and the history would read as corrupt rather than as
+    incomplete. So the header is rewritten once, old rows gaining an empty cell
+    that `load_history` reads as `blocked`, which is what they were.
+    """
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8", newline="") as f:
+        rows = list(csv.reader(f))
+    if not rows or rows[0] == columns:
+        return
+    if rows[0] != columns[:len(rows[0])]:
+        raise ValueError(
+            f"{path} has an unexpected header {rows[0]} — refusing to migrate it. Expected "
+            f"the first {len(rows[0])} of {columns}."
+        )
+    width = len(columns)
+    padded = [row + [""] * (width - len(row)) for row in rows[1:]]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(columns)
+        writer.writerows(padded)
+    logger.info("Added %d column(s) to %s", width - len(rows[0]), path)
 
 
 def record_result(history_path: Path, items_path: Path, *, date: str,
-                  result: DrillResult, notes: str = "") -> None:
+                  result: DrillResult, notes: str = "",
+                  condition: str = BLOCKED) -> None:
     """
     Appends one attempt, plus one row per item.
 
     Unlike the session history this does not refuse a date it already holds:
     drilling the same pattern twice in a day is the entire point, and each run is
-    a separate observation rather than one counted twice.
+    a separate observation rather than one counted twice. `condition` is what
+    keeps two such runs readable — a blocked block and a mixed one on the same
+    day are two measurements of different things, not one score recorded twice.
     """
+    if condition not in {BLOCKED, MIXED}:
+        raise ValueError(f"Unknown condition {condition!r}; expected {BLOCKED} or {MIXED}.")
+
     for path, columns, rows in (
         (history_path, HISTORY_COLUMNS, [{
             "date": date,
@@ -325,6 +395,7 @@ def record_result(history_path: Path, items_path: Path, *, date: str,
             "attempted": result.attempted,
             "correct": result.correct,
             "notes": notes,
+            "condition": condition,
         }]),
         (items_path, ITEM_COLUMNS, [{
             "date": date,
@@ -333,9 +404,11 @@ def record_result(history_path: Path, items_path: Path, *, date: str,
             "prompt": r.item.prompt,
             "attempted": int(r.attempted),
             "correct": int(r.correct),
+            "condition": condition,
         } for r in result.items]),
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
+        _widen_header(path, columns)
         is_new = not path.exists()
         with path.open("a", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=columns)
@@ -343,7 +416,8 @@ def record_result(history_path: Path, items_path: Path, *, date: str,
                 writer.writeheader()
             writer.writerows(rows)
 
-    logger.info("Recorded %s: %d/%d", result.drill.name, result.correct, result.attempted)
+    logger.info("Recorded %s (%s): %d/%d", result.drill.name, condition,
+                result.correct, result.attempted)
 
 
 def load_history(path: Path) -> list[HistoryRow]:
@@ -361,6 +435,7 @@ def load_history(path: Path) -> list[HistoryRow]:
                 attempted=int(raw["attempted"]),
                 correct=int(raw["correct"]),
                 notes=(raw.get("notes") or "").strip(),
+                condition=(raw.get("condition") or "").strip() or BLOCKED,
             ))
     rows.sort(key=lambda r: r.date)
     return rows
@@ -379,6 +454,7 @@ def load_item_history(path: Path) -> list[ItemRow]:
                 prompt=raw["prompt"].strip(),
                 attempted=raw["attempted"].strip() == "1",
                 correct=raw["correct"].strip() == "1",
+                condition=(raw.get("condition") or "").strip() or BLOCKED,
             ))
     rows.sort(key=lambda r: r.date)
     return rows
@@ -425,6 +501,69 @@ def select_items(drill: Drill, item_rows: list[ItemRow], sample: int) -> list[Dr
     return [item for _, item in sorted(ordered, key=lambda pair: pair[0])]
 
 
+def priority_order(drills: list[Drill], mistakes_path: Optional[Path]) -> list[Drill]:
+    """
+    Drills ranked by the impact of the category they train, worst first.
+
+    Impact is the ranking the whole project uses (CLAUDE.md rule 15), so a mixed
+    block draws from the patterns that are actually costing the most rather than
+    from whatever sorts first alphabetically. A drill whose category isn't in the
+    mistake history yet sorts last: nothing has measured it, so nothing says it
+    belongs at the front.
+
+    Falls back to alphabetical order if the history can't be read — a missing
+    `mistakes.csv` should cost the block its ranking, not its existence.
+    """
+    if mistakes_path is None:
+        return sorted(drills, key=lambda d: d.name)
+    try:
+        from voxlib import mistakes as mistakes_module
+
+        trends = mistakes_module.summarize(mistakes_module.load(mistakes_path))
+    except Exception:  # unreadable, malformed, or not there yet
+        logger.warning("Could not rank drills by impact from %s; using name order",
+                       mistakes_path)
+        return sorted(drills, key=lambda d: d.name)
+
+    rank = {t.category: position for position, t in enumerate(trends)}
+    return sorted(drills, key=lambda d: (rank.get(d.category, len(rank)), d.name))
+
+
+def select_mixed(drills: list[Drill], item_rows: list[ItemRow],
+                 count: int = DEFAULT_MIXED_ITEMS,
+                 patterns: int = MIXED_PATTERNS) -> list[tuple[Drill, DrillItem]]:
+    """
+    An interleaved block: items from several drills, round-robined.
+
+    `drills` arrives already ranked — see `priority_order` — and the first
+    `patterns` of them take part. Each contributes its own next items, chosen by
+    exactly the same rule a blocked block uses, so a miss under interleaving is
+    still what comes back first next time.
+
+    Round-robin rather than shuffled, for the same reason `select_items` is
+    deterministic: the property being bought is that consecutive prompts belong
+    to different patterns, and a shuffle delivers that only on average while
+    making two blocks on the same day incomparable. Within one drill the items
+    keep their file order, which is what lets the answers be scored per drill
+    afterwards.
+    """
+    participating = [d for d in drills if d.items][:max(patterns, 0)]
+    if not participating or count <= 0:
+        return []
+
+    queues: list[tuple[Drill, list[DrillItem]]] = []
+    for position, drill in enumerate(participating):
+        share = count // len(participating) + (1 if position < count % len(participating) else 0)
+        queues.append((drill, select_items(drill, item_rows, share)[:share]))
+
+    mixed: list[tuple[Drill, DrillItem]] = []
+    while any(items for _, items in queues):
+        for drill, items in queues:
+            if items:
+                mixed.append((drill, items.pop(0)))
+    return mixed
+
+
 # --- the pending sample ------------------------------------------------------
 #
 # `next` and `score` are separated by the whole practice session, and the
@@ -439,18 +578,45 @@ def write_pending(path: Path, drill: Drill, item_ids: list[str]) -> None:
                     encoding="utf-8")
 
 
-def read_pending(path: Path, drill_name: str) -> Optional[list[str]]:
-    """The sample waiting to be scored, if it belongs to this drill."""
+def _read_pending(path: Path) -> dict:
     if not path.exists():
-        return None
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         logger.warning("Ignoring unreadable pending sample at %s", path)
-        return None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def read_pending(path: Path, drill_name: str) -> Optional[list[str]]:
+    """The sample waiting to be scored, if it belongs to this drill."""
+    data = _read_pending(path)
     if data.get("drill") != drill_name:
         return None
     return data.get("item_ids") or None
+
+
+def write_mixed_pending(path: Path, chosen: list[tuple[Drill, DrillItem]]) -> None:
+    """
+    The same idea for a mixed block, which spans drills and so needs the drill
+    recorded per item — the answers come back as one list and have to be split
+    between the patterns they belong to.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "mode": MIXED,
+        "items": [{"drill": drill.name, "item_id": item.item_id} for drill, item in chosen],
+    }, indent=2), encoding="utf-8")
+
+
+def read_mixed_pending(path: Path) -> Optional[list[tuple[str, str]]]:
+    """The mixed block waiting to be scored, in the order it was asked."""
+    data = _read_pending(path)
+    if data.get("mode") != MIXED:
+        return None
+    pairs = [(entry.get("drill"), entry.get("item_id")) for entry in data.get("items") or []]
+    return [(d, i) for d, i in pairs if d and i] or None
 
 
 # --- rendering ---------------------------------------------------------------
@@ -488,21 +654,30 @@ def format_history(rows: list[HistoryRow]) -> str:
     if not rows:
         return "No drills recorded yet. `python -m voxlib.drill list` to see what's available."
 
-    header = f"{'Date':<12} {'Drill':<28} {'Score':>9} {'Accuracy':>9} {'Set':>9}"
+    header = (f"{'Date':<12} {'Drill':<28} {'Score':>9} {'Accuracy':>9} {'Set':>9} "
+              f"{'Asked':>9}")
     lines = [header, "-" * len(header)]
     seen_fingerprints: dict[str, set[str]] = {}
+    seen_conditions: dict[str, set[str]] = {}
     for r in rows:
         accuracy = "—" if r.accuracy is None else f"{r.accuracy:.0%}"
         lines.append(f"{r.date:<12} {r.drill[:28]:<28} {r.correct:>4}/{r.attempted:<4} "
-                     f"{accuracy:>9} {r.fingerprint or '—':>9}")
+                     f"{accuracy:>9} {r.fingerprint or '—':>9} {r.condition:>9}")
         seen_fingerprints.setdefault(r.drill, set()).add(r.fingerprint)
+        seen_conditions.setdefault(r.drill, set()).add(r.condition)
 
     changed = [name for name, prints in seen_fingerprints.items() if len(prints) > 1]
+    both = [name for name, conditions in seen_conditions.items() if len(conditions) > 1]
     lines.append("")
     if changed:
         lines.append(f"Item set changed at some point for: {', '.join(changed)} — scores "
                      f"either side of a new fingerprint are different measurements, so "
                      f"don't read one trend through both.")
+    if both:
+        lines.append(f"Asked under both conditions: {', '.join(both)} — an interleaved block "
+                     f"is deliberately harder than a blocked one (nothing primes the next "
+                     f"prompt), so compare mixed with mixed. A fall on the session the "
+                     f"condition changed is the measurement, not a regression.")
     lines.append("Accuracy is over items attempted, not items asked — a prompt answered "
                  "with a different construction is not an error.")
     return "\n".join(lines)
@@ -528,20 +703,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--history", type=Path, default=analysis / "drills.csv")
     parser.add_argument("--item-history", type=Path, default=analysis / "drill_items.csv")
     parser.add_argument("--pending", type=Path, default=analysis / "drill_pending.json")
+    parser.add_argument("--mistakes", type=Path, default=analysis / "mistakes.csv",
+                        help="Mistake history, used to rank patterns in a mixed block")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("list", help="Available drills")
 
     nxt = sub.add_parser("next", help="The prompts to ask this session")
-    nxt.add_argument("drill")
-    nxt.add_argument("--count", type=int, default=DEFAULT_ITEMS)
+    nxt.add_argument("drill", nargs="?", help="Omit it when using --mixed")
+    nxt.add_argument("--count", type=int, default=None)
+    nxt.add_argument("--mixed", action="store_true",
+                     help="Interleave several patterns instead of blocking on one")
+    nxt.add_argument("--patterns", type=int, default=MIXED_PATTERNS,
+                     help=f"How many drills a mixed block spans (default {MIXED_PATTERNS})")
+    nxt.add_argument("--include", action="append", metavar="DRILL", default=[],
+                     help="Drill that must be in the mixed block whatever its impact "
+                          "ranking — this session's focus. Repeatable.")
 
     score_cmd = sub.add_parser("score", help="Score the answers to the last prompts")
-    score_cmd.add_argument("drill")
+    score_cmd.add_argument("drill", nargs="?", help="Omit it when using --mixed")
     score_cmd.add_argument("--answers", type=Path, required=True,
                            help="Their answers, one per line, in the order asked")
     score_cmd.add_argument("--date", default=date_type.today().isoformat())
     score_cmd.add_argument("--notes", default="")
+    score_cmd.add_argument("--mixed", action="store_true",
+                           help="Score the interleaved block drawn by `next --mixed`")
     score_cmd.add_argument("--whole-drill", action="store_true",
                            help="Ignore the pending sample and score every item")
     score_cmd.add_argument("--dry-run", action="store_true",
@@ -551,12 +737,24 @@ def main(argv: list[str] | None = None) -> int:
     item_cmd.add_argument("drill")
 
     args = parser.parse_args(argv)
+    mixed = getattr(args, "mixed", False)
 
     if args.command in {"next", "score", "items"}:
         drills = {d.name: d for d in load_all(args.drills_dir)}
-        drill = drills.get(args.drill)
-        if drill is None:
-            parser.error(f"No drill named {args.drill!r}. Available: {', '.join(drills) or 'none'}")
+        if mixed:
+            if args.drill:
+                parser.error("Pass either a drill name or --mixed, not both — a mixed block "
+                             "spans several drills by design.")
+            if not drills:
+                parser.error(f"No drills in {args.drills_dir} to mix.")
+            drill = None
+        else:
+            if not args.drill:
+                parser.error(f"Which drill? Available: {', '.join(drills) or 'none'}")
+            drill = drills.get(args.drill)
+            if drill is None:
+                parser.error(f"No drill named {args.drill!r}. "
+                             f"Available: {', '.join(drills) or 'none'}")
 
     if args.command == "list":
         found = load_all(args.drills_dir)
@@ -568,8 +766,40 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{'':<26} {d.target}")
         return 0
 
+    if args.command == "next" and mixed:
+        count = args.count or DEFAULT_MIXED_ITEMS
+        unknown = [name for name in args.include if name not in drills]
+        if unknown:
+            parser.error(f"--include names no such drill: {unknown}. "
+                         f"Available: {', '.join(drills)}")
+        # The session's focus goes in whatever its impact ranking says, because
+        # the focus is chosen on a spaced-repetition schedule (P15) and the
+        # ranking knows nothing about that schedule.
+        ranked = [drills[name] for name in args.include] + [
+            d for d in priority_order(list(drills.values()), args.mistakes)
+            if d.name not in set(args.include)
+        ]
+        chosen = select_mixed(ranked, load_item_history(args.item_history), count,
+                              patterns=args.patterns)
+        if not chosen:
+            print("Nothing to ask — no drill has any items.")
+            return 1
+        write_mixed_pending(args.pending, chosen)
+        patterns = len({d.name for d, _ in chosen})
+        print(f"{len(chosen)} prompts, {patterns} patterns, interleaved.")
+        print("Which pattern each prompt tests is deliberately not shown: this output is "
+              "visible to the person answering, and knowing the pattern is most of the "
+              "answer. Ask them one at a time, in this order.")
+        print()
+        for i, (_, item) in enumerate(chosen, 1):
+            print(f"{i:>2}. {item.prompt}")
+        print()
+        print("Afterwards: score --mixed --answers <their answers, one per line>")
+        return 0
+
     if args.command == "next":
-        chosen = select_items(drill, load_item_history(args.item_history), args.count)
+        chosen = select_items(drill, load_item_history(args.item_history),
+                              args.count or DEFAULT_ITEMS)
         write_pending(args.pending, drill, [i.item_id for i in chosen])
         print(f"{drill.name} — {drill.target}")
         print(f"{len(chosen)} of {drill.size} items, hardest first. Ask them one at a time.")
@@ -602,6 +832,40 @@ def main(argv: list[str] | None = None) -> int:
         print("Asked counts only the times the item was actually answered with this "
               "structure. The prompts at the top of the next sample are the ones missed "
               "or not yet seen.")
+        return 0
+
+    if args.command == "score" and mixed:
+        if not args.answers.exists():
+            parser.error(f"No answers file at {args.answers}.")
+
+        pending = read_mixed_pending(args.pending)
+        if not pending:
+            parser.error("No mixed block is waiting to be scored. A mixed block can only be "
+                         "scored against the sample `next --mixed` handed out, since the "
+                         "answers have to be split between the patterns they belong to.")
+
+        unknown = sorted({name for name, _ in pending if name not in drills})
+        if unknown:
+            parser.error(f"The pending block names drills that no longer exist: {unknown}")
+
+        answers = load_answers(args.answers)
+        by_drill: dict[str, list[str]] = {}
+        for name, item_id in pending:
+            by_drill.setdefault(name, []).append(item_id)
+
+        # One row per drill, not one per block: the block is the condition, and
+        # the thing being tracked is still each pattern's own accuracy.
+        for name, item_ids in by_drill.items():
+            result = score(drills[name].subset(item_ids), answers)
+            print(format_result(result))
+            print()
+            if not args.dry_run:
+                record_result(args.history, args.item_history, date=args.date,
+                              result=result, notes=args.notes, condition=MIXED)
+
+        if not args.dry_run:
+            args.pending.unlink(missing_ok=True)
+            print(f"Recorded {len(by_drill)} patterns from one mixed block in {args.history}.")
         return 0
 
     if args.command == "score":

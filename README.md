@@ -452,6 +452,15 @@ instead.
 Prompts lead with whatever you missed last time, then whatever you haven't seen,
 so a pool of thirty-odd items never turns into a memorised list of five.
 
+The block is also **interleaved**: consecutive prompts come from different
+patterns, and which pattern a prompt is testing isn't shown. Five prompts in a
+row on one structure mostly measure whether it's still in your head from the
+prompt before — the first four attempts scored 100% that way while the same
+mistakes kept turning up in recordings. Mixing them means each answer has to be
+retrieved from scratch, which is the condition speech runs in, so expect lower
+scores and don't read them as a step backwards: each score records which way it
+was asked, and the two are never compared with each other.
+
 ### Reading your own history
 
 You never need these, but it's your data:

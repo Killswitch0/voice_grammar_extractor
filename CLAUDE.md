@@ -431,11 +431,17 @@ drills and still appears in recordings is not misunderstood — it is not yet
 automatic, and the fix is volume, not explanation. Never present a drill score
 as evidence about speech.
 
-Two columns are instructions rather than decoration:
+Three columns are instructions rather than decoration:
 
 - **`Set`** — the fingerprint of the item pool. If it changed between two rows,
   the drill was edited, and the scores either side are different measurements —
   say so instead of drawing one trend through both.
+- **`Asked`** — `blocked` (five prompts, one pattern) or `mixed` (interleaved
+  with other patterns, nothing priming the next one). These are two conditions,
+  not two sessions: an interleaved score is expected to be lower, so compare
+  mixed with mixed and never report the fall on the session the condition
+  changed as a regression. The first four attempts on record are all `blocked`
+  and all 100%, which is the ceiling `--mixed` exists to get past.
 - **`Score` vs `items`** — accuracy is over items *attempted*. A prompt answered
   with some other construction counts towards neither side.
 
@@ -847,28 +853,62 @@ P18. At the end of the session, update (or create)
      session" for the streak, the same as one made mid-conversation. It is
      the same pattern failing, under an easier condition.
 
-P19. If the session's focus category has a drill (its `category:` matches the
-     `## <Mistake Name>` heading exactly), **open the session with it**:
+     A mixed block covers two patterns besides the focus, and those were
+     drilled too — log a row for each pattern the block actually asked about,
+     not only for the focus. A pattern that came up nowhere else in the session
+     still gets its `Last drilled` moved: it was tested.
+
+P19. **Open the session with a mixed block** — prompts from several patterns,
+     interleaved so no two in a row train the same frame:
 
      ```bash
-     python -m voxlib.drill next "<drill-name>"        # 5 prompts, hardest first
+     python -m voxlib.drill next --mixed --include "<focus-drill>"   # 6 prompts, 3 patterns
+     ```
+
+     `--include` pins this session's focus, because P15 picks it on a
+     spaced-repetition schedule that the impact ranking knows nothing about. The
+     other patterns come from the top of `python -m voxlib.mistakes`.
+
+     **Drop `--include` when the focus category has no drill — the block still
+     runs.** That is the difference between a session that measured something
+     and one that didn't: on 2026-08-13 and 2026-08-17 the focus category had no
+     drill, the block was skipped entirely under the old rule, and neither
+     session produced a single scored item.
+
+     A single-pattern block is still available, and is the right choice when a
+     frame is being introduced for the first time and needs massing before it
+     can survive interleaving:
+
+     ```bash
+     python -m voxlib.drill next "<drill-name>"        # 5 prompts, one pattern
      ```
 
      Ask them one at a time under P1–P6, exactly like any other question —
-     correction, one-line why, next prompt. Then move into normal
-     conversation for the rest of the session; the block is a warm-up that
-     puts the pattern in front of them, not the session.
+     flag, repair, one-line why, re-production, next prompt. Then move into
+     normal conversation for the rest of the session; the block is a warm-up
+     that puts the patterns in front of them, not the session.
 
-     The command prints prompts and deliberately withholds the model
-     answers, because its output is visible to the person answering. Correct
-     from your own knowledge of English, not from an answer key on screen.
+     The command withholds two things on purpose, and both matter: the model
+     answers, because the output is visible to the person answering, and which
+     pattern each prompt belongs to, because naming it restores the priming the
+     mixed block exists to remove. Don't announce it yourself either — P16's
+     focus line names the session's focus, not the pattern behind prompt 4.
+     Correct from your own knowledge of English, not from an answer key.
 
      At the end, write their answers to a scratch file, one per line in the
      order asked, and record the attempt:
 
      ```bash
+     python -m voxlib.drill score --mixed --answers <file>
+     # or, after a single-pattern block:
      python -m voxlib.drill score "<drill-name>" --answers <file>
      ```
+
+     **Expect a lower score under `--mixed`, and don't report it as a
+     regression.** The four blocked attempts on record all scored 100% while
+     every one of those categories kept appearing in live speech; that ceiling
+     is what interleaving is for. `drills.csv` records the condition on each
+     row, and mixed is only ever compared with mixed.
 
      This is the only place drills are run. Never ask them to record
      themselves speaking the prompts, or to run the transcription pipeline for
@@ -876,10 +916,9 @@ P19. If the session's focus category has a drill (its `category:` matches the
      exercise that costs a recorder app and a transcription run is one that
      doesn't get done.
 
-     If the category has no drill, skip this entirely and run the session as
-     a normal conversation. Do not invent prompts and score them by hand:
-     an unscored improvised block is the fill-in-the-blank exercise this was
-     built to replace.
+     If no drill exists at all yet, run the session as a normal conversation.
+     Do not invent prompts and score them by hand: an unscored improvised block
+     is the fill-in-the-blank exercise this was built to replace.
 P20. An item missed in the drill block must come back later in the same
      conversation in different words, never as the same sentence. Re-asking the sentence
      verbatim trains the answer; the point is the frame, and the only proof
@@ -1105,9 +1144,9 @@ analysis/
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.
   drills.csv             append-only, written by `python -m voxlib.drill score`: one row
-                           per drill attempt — items, attempted, correct and the pool's
-                           fingerprint. The only score here with a denominator. Read it in
-                           step 4b; don't edit it.
+                           per drill attempt — items, attempted, correct, the pool's
+                           fingerprint, and whether it was asked blocked or mixed. The only
+                           score here with a denominator. Read it in step 4b; don't edit it.
   drill_items.csv        append-only, same writer: one row per item per attempt, so
                            "which prompt keeps failing" is answerable and the next sample
                            can lead with it. Read via `python -m voxlib.drill items`.
