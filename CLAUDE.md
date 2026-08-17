@@ -220,7 +220,8 @@ their rules together in one response.
       honest. More recordings do not make the measurement better; they mostly
       consume the time the treatment needed.
     - **Corrected repetitions** are the treatment, and they all happen in
-      Conversation Practice Mode: every sentence is corrected within seconds,
+      Conversation Practice Mode: every error is flagged for the speaker to
+      repair and then re-produced in a new sentence of their own (rules P21-P22),
       and the session opens with a drill (`python -m voxlib.drill`, step 4b)
       that produces one frame against a known answer key.
 
@@ -228,6 +229,11 @@ their rules together in one response.
     and say plainly if the practice side is the smaller one. Five things to
     notice while speaking, recommended into a week that contained no corrected
     repetitions, is a report describing the problem for a second time.
+
+    **Both counts are in `python -m voxlib.practice`** — its last line prints
+    recordings, practice sessions and corrected repetitions over the last
+    fortnight. Read them there. This comparison used to be made from memory,
+    which is how a fortnight of recordings and no practice went unremarked.
 
 20. **One target goes into the next recording, not five.** `Current Priorities`
     and the action plan are the *analysis*, and five entries there is correct.
@@ -319,6 +325,22 @@ ordinary recurrence — call it out explicitly in the session report and in
 that mistake's `Notes:` in `memory.md` (e.g. "drilled in conversation
 practice on `<date>`, still occurring in speech — understood, not yet
 automatic").
+
+`python -m voxlib.practice` sharpens that same reading into a number, and its
+table is worth reading here rather than only in practice mode. It gives each
+category's error rate in *typed, attended* production next to its rate in
+speech, over the same weeks:
+
+- **Clean typed, failing spoken** — known and not automatic. The fix is volume
+  of corrected production, not another explanation, and a session report that
+  explains the rule again is describing the problem.
+- **Failing both** — not reliably known yet. This is the one that still needs
+  teaching.
+- The last line prints recordings against practice sessions and corrected
+  repetitions for the last fortnight, which is the comparison rule 19 asks the
+  action plan to make. Read it there rather than estimating.
+
+Practice mode writes that file; this workflow only reads it.
 
 ## 4. Measure fluency indicators (separate from grammar)
 
@@ -651,10 +673,12 @@ Note the division of labour between the history files:
 | `mistakes.csv` | you, via `python -m voxlib.mistakes add` (step 6) | which mistakes occurred how often, per session |
 | `fluency_history.csv` | the pipeline | how the recording came out and how it was spoken |
 | `drills.csv` / `drill_items.csv` | `python -m voxlib.drill score` | drill attempts and per-item results — the only scores with a known denominator |
+| `practice_history.csv` | `python -m voxlib.practice add`, in practice mode (P25) | typed practice: words produced, errors, corrected repetitions — attended production, the rung between a drill and a recording |
 
-You own the first two. `fluency_history.csv` and the drill files you only ever
-read — don't edit or append to them by hand. All of them are append-only: never
-rewrite a past row, even if a later session reassesses something differently.
+You own the first two. `fluency_history.csv`, the drill files and
+`practice_history.csv` you only ever read — don't edit or append to them by hand.
+All of them are append-only: never rewrite a past row, even if a later session
+reassesses something differently.
 
 ## 8. Report back in chat
 
@@ -674,7 +698,7 @@ Always teach through dialogue, not lists of exercises.
 
 ## Rules
 
-Numbered `P1`–`P24` on purpose. The `P` is what carries the distinction, not
+Numbered `P1`–`P25` on purpose. The `P` is what carries the distinction, not
 the number: "General rules" now also run `1`–`20` above, so a bare "rule 17"
 would be ambiguous and every reference in this file must keep its prefix. The
 two rule sets are never mixed (see "Modes in this repo"), but the numbers must
@@ -756,6 +780,11 @@ never write to `analysis/memory.md`. That file's scores need to stay
 comparable from session to session for the recording-analysis workflow
 above; mixing in typed-dialogue practice would break that.
 
+Two files this mode does own and does write: `analysis/conversation_focus_log.md`
+(the schedule, P18) and `analysis/practice_history.csv` (what actually happened,
+P25). Everything else here — `memory.md`, `mistakes.csv`, `fluency_history.csv`
+— is read-only.
+
 `analysis/conversation_focus_log.md` structure (owned only by this mode):
 
 ```markdown
@@ -776,10 +805,17 @@ P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
      Priorities`, `Persistent Grammar Mistakes`, `Focus For Next
      Recording`, `Vocabulary To Replace`, `Useful Vocabulary Learned`) and
      `analysis/conversation_focus_log.md` (see structure above), and run
-     `python -m voxlib.drill list` to see which categories have a drill. If
-     any of these is missing or unreadable, say nothing and fall back to
+     `python -m voxlib.drill list` to see which categories have a drill and
+     `python -m voxlib.practice` for how the last few practice sessions went.
+     If any of these is missing or unreadable, say nothing and fall back to
      normal topic selection (P10) and a B1+ starting difficulty (P8) —
      never block on this.
+
+     The practice table's `Typed` vs `Spoken` columns are worth a look before
+     picking the focus: a category that is already clean in typed production and
+     still failing in recordings doesn't need explaining here, it needs volume,
+     so prefer one that is failing on both sides when the schedule leaves you a
+     choice (P15's tie-break).
 P15. Pick ONE focus grammar pattern for the session:
      - If `Persistent Grammar Mistakes` has no entries yet (common in the
        first few sessions — a mistake only becomes "persistent" after
@@ -978,9 +1014,9 @@ P23. **Two or three long turns per session, and count what was produced.**
      six short answers. Read the whole thing, then take the two costliest
      errors through P21/P22 and let the rest go.
 
-     At the end of the session, report in chat: words they produced, errors by
-     category, how many re-productions they did, and the drill score if there
-     was a drill block.
+     At the end of the session, report in chat — words they produced, errors by
+     category, how many re-productions they did, and the drill score if there was
+     a drill block — and record the same numbers (P25).
 P24. **Name two or three banned words and two or three required replacements
      at the start, and hold them.** Take the banned side from `Vocabulary To
      Replace` and from whatever the latest session report's Fluency section
@@ -1000,6 +1036,37 @@ P24. **Name two or three banned words and two or three required replacements
 
      Never more than three banned words at once. The constraint has to be
      holdable while talking, which is General rule 20's logic applied here.
+P25. **Record the session before you finish it:**
+
+     ```bash
+     python -m voxlib.practice add --date YYYY-MM-DD --focus "<## Mistake Name>" \
+       --words <words they produced> --reproductions <P22 count> \
+       --long-turns <P23 count> "Article Errors:3" "Redundant Reflexive Pronoun:1"
+     ```
+
+     - `--words` counts **their** words, not the whole dialogue. Estimate it from
+       their answers; a rough count is a denominator, and no count is not.
+     - One `"Category:count"` per category that produced an error, using the
+       exact `## <Mistake Name>` headings (the same join key rule P15 uses for
+       the focus log). Errors outside any tracked category: leave them out of the
+       counts and mention them in `--notes`.
+     - No arguments at all means a clean session, and that is worth writing —
+       an unlogged session and a clean one look identical afterwards.
+     - Never edit `analysis/practice_history.csv` by hand.
+
+     Why this exists: `drills.csv` says whether a form is *known* and
+     `mistakes.csv` says whether it *survives into speech*, and by 2026-08-17 the
+     first said yes for every category while the second said no. Nothing measured
+     the rung between them — typed production, attended, with the topic real and
+     the pattern unannounced. The focus log recorded that a pattern had been
+     practised and on what date, never how it went, so a category could be
+     drilled here for weeks with no way to tell whether the practice was
+     landing.
+
+     It also makes rule 19's budget countable. `python -m voxlib.practice` prints
+     recordings against practice sessions and corrected repetitions for the last
+     fortnight — the comparison that rule asks the session report to make, which
+     until now had no counter to read.
 
 ## Goal
 
@@ -1155,6 +1222,12 @@ analysis/
   processed.json         written by the PIPELINE: which recordings have already been
                            transcribed (matched by content, not filename). Guards against
                            merging the same audio into two sessions. Don't edit it.
+  practice_history.csv   append-only, written by Conversation Practice Mode via
+                           `python -m voxlib.practice add` (P25): one row per practice
+                           session — words produced, errors by category, corrected
+                           repetitions, long turns. Attended production: the rung between
+                           "knows the form" (drills.csv) and "produces it unmonitored"
+                           (mistakes.csv). Read via `python -m voxlib.practice`.
   conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
                                tracks which memory.md patterns have been drilled in
                                dialogue, when, and on a spaced-repetition schedule

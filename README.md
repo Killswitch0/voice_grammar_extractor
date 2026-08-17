@@ -469,6 +469,7 @@ You never need these, but it's your data:
 python -m voxlib.drill                                # every attempt: score and accuracy
 python -m voxlib.drill list                           # what drills you have
 python -m voxlib.drill items articles-linking-verb    # which prompts keep failing
+python -m voxlib.practice                             # practice sessions: typed vs spoken
 ```
 
 Accuracy is over items *attempted* — a prompt you answered with a different
@@ -482,6 +483,16 @@ It tells you whether you **know** the form: you answered in writing, with time t
 think and one structure in mind. It does not tell you whether the form survives
 into speech — that's what the recordings are for. A pattern you score well on and
 still get wrong in a recording isn't misunderstood; it just isn't automatic yet.
+
+`python -m voxlib.practice` is the rung between those two. Each practice session
+records how many words you produced, how many errors were in them and how many
+corrections you turned back into a sentence of your own, so a typed error rate
+per 1,000 words sits next to the spoken one from the same weeks. Worse typed than
+spoken means the pattern isn't reliably known and wants explaining; clean typed
+and failing spoken means it's known and wants volume. The same table prints how
+many recordings and how many practice sessions the last fortnight held — the
+recording measures, only the corrected repetitions train, and it's easy to do a
+lot of the first and none of the second.
 
 ### Your drills are yours
 

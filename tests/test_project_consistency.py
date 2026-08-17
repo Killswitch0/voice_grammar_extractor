@@ -151,3 +151,29 @@ def test_claude_md_tells_the_workflow_to_read_every_measured_column(column):
     assert column in CLAUDE_MD.read_text(encoding="utf-8"), (
         f"the pipeline measures {column} but CLAUDE.md never tells the workflow to read it"
     )
+
+
+def test_practice_mode_is_told_to_record_the_session_it_just_ran():
+    """
+    Same reasoning as the drill history above, one rung down. Typed practice is
+    the only measurement of attended production, and a file nothing instructs the
+    model to write stays empty — which is how the mode ran for two weeks
+    recording only the date it had run on.
+    """
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+
+    assert "voxlib.practice" in text, "CLAUDE.md never tells practice mode to record a session"
+    assert "practice_history.csv" in text, "CLAUDE.md never names the practice history"
+
+
+def test_the_personal_data_files_are_all_gitignored():
+    """
+    Every history under analysis/ is the owner's own speech data, and this repo
+    may be public. A new one is easy to add to CLAUDE.md and forget here.
+    """
+    ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+
+    for name in ("memory.md", "mistakes.csv", "scores_history.csv", "fluency_history.csv",
+                 "drills.csv", "drill_items.csv", "practice_history.csv",
+                 "conversation_focus_log.md"):
+        assert f"analysis/{name}" in ignored, f"analysis/{name} would be committed"

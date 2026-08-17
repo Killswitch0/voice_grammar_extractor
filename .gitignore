@@ -18,6 +18,7 @@ analysis/drill_items.csv
 analysis/drill_pending.json
 analysis/processed.json
 analysis/conversation_focus_log.md
+analysis/practice_history.csv
 analysis/.gitignore
 analysis/drills/
 
