@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from voxlib import drill
+from voxlib import csvfile, drill
 from voxlib.drill import Drill, DrillItem, ItemRow
 
 # Engine and CLI tests run against invented content. The real drills are built
@@ -685,7 +685,7 @@ def test_a_header_that_is_not_an_older_version_of_this_file_is_refused(tmp_path:
     history.write_text("when,what\n2026-08-10,something\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="refusing to migrate"):
-        drill._widen_header(history, drill.HISTORY_COLUMNS)
+        csvfile.widen_header(history, drill.HISTORY_COLUMNS)
 
 
 def test_the_history_warns_when_one_drill_was_asked_under_both_conditions():
@@ -697,3 +697,117 @@ def test_the_history_warns_when_one_drill_was_asked_under_both_conditions():
     ]
 
     assert "both conditions" in drill.format_history(rows)
+
+
+# --- answers recorded as they are given --------------------------------------
+#
+# The block is asked one prompt at a time across a conversation that runs on for
+# another half hour afterwards. Collecting the answers at the end means holding
+# them verbatim through everything that came in between, and the failure is
+# silent: a paraphrase still scores, just not against what was said.
+
+def test_answers_are_recorded_against_the_block_in_order(tmp_path: Path):
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+
+    drill.main(paths + ["answer", "She's a teacher."])
+    block = drill.read_block(tmp_path / "pending.json")
+
+    assert block.answers == ["She's a teacher."]
+    assert not block.complete
+
+
+def test_a_block_knows_when_it_is_full(tmp_path: Path, capsys):
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+
+    drill.main(paths + ["answer", "one"])
+    drill.main(paths + ["answer", "two"])
+
+    assert drill.read_block(tmp_path / "pending.json").complete
+    assert "score it" in capsys.readouterr().out
+
+
+def test_a_seventh_answer_to_a_six_prompt_block_is_refused(tmp_path: Path):
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+    drill.main(paths + ["answer", "one"])
+    drill.main(paths + ["answer", "two"])
+
+    with pytest.raises(SystemExit):
+        drill.main(paths + ["answer", "three"])
+
+
+def test_recording_an_answer_with_no_block_says_so(tmp_path: Path):
+    with pytest.raises(SystemExit):
+        drill.main(_cli_paths(tmp_path) + ["answer", "anything"])
+
+
+def test_the_last_answer_can_be_taken_back(tmp_path: Path):
+    """For one written down wrong — not for one the speaker went on to repair."""
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+    drill.main(paths + ["answer", "mistyped"])
+
+    drill.main(paths + ["answer", "--undo"])
+
+    assert drill.read_block(tmp_path / "pending.json").answers == []
+
+
+def test_recorded_answers_are_scored_against_the_item_they_were_given_to():
+    """`score` has to infer the pairing from order and regexes; recorded answers
+    carry it, and inferring what you already know can only lose."""
+    running = _drill([_item(), _teacher_item()])
+
+    result = drill.score_recorded(running, {
+        running.items[0].item_id: "He's fanatic.",
+        running.items[1].item_id: "She's a teacher.",
+    })
+
+    assert [(r.attempted, r.correct) for r in result.items] == [(True, False), (True, True)]
+
+
+def test_an_unanswered_item_counts_as_unattempted_not_as_a_miss():
+    """A block abandoned halfway is a shorter block, not a failed one."""
+    running = _drill([_item(), _teacher_item()])
+
+    result = drill.score_recorded(running, {running.items[0].item_id: "He's a fanatic."})
+
+    assert result.attempted == 1 and result.correct == 1
+
+
+def test_a_block_scores_from_its_recorded_answers_without_a_file(tmp_path: Path, capsys):
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+    for answer in ("He's a fanatic.", "She teaches English."):
+        drill.main(paths + ["answer", answer])
+    capsys.readouterr()
+
+    drill.main(paths + ["score"])
+
+    rows = drill.load_history(tmp_path / "drills.csv")
+    assert rows and all(row.condition == drill.MIXED for row in rows)
+    assert not (tmp_path / "pending.json").exists()
+
+
+def test_scoring_with_nothing_answered_and_no_file_is_refused(tmp_path: Path):
+    """Silently recording 0/0 would put a row in the history for a block nobody
+    was ever asked."""
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+
+    with pytest.raises(SystemExit):
+        drill.main(paths + ["score"])
+
+
+def test_a_single_pattern_block_also_scores_from_recorded_answers(tmp_path: Path, capsys):
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", FIXTURE_DRILL, "--count", "2"])
+    drill.main(paths + ["answer", "He's a fanatic."])
+    drill.main(paths + ["answer", "She's an engineer."])
+    capsys.readouterr()
+
+    drill.main(paths + ["score", FIXTURE_DRILL])
+
+    rows = drill.load_history(tmp_path / "drills.csv")
+    assert len(rows) == 1 and rows[0].drill == FIXTURE_DRILL

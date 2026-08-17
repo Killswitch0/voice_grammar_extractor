@@ -73,6 +73,8 @@ from datetime import date as date_type
 from pathlib import Path
 from typing import Optional
 
+from voxlib import csvfile
+
 logger = logging.getLogger(__name__)
 
 # One row per attempt — what step 4b of the analysis workflow reads.
@@ -309,6 +311,33 @@ def score(drill: Drill, answers: list[str]) -> DrillResult:
     return result
 
 
+def score_recorded(drill: Drill, answers: dict[str, str]) -> DrillResult:
+    """
+    Score each item against the answer that was given to *that* item.
+
+    The same judgment as `score` — `attempted` decides whether the structure was
+    tried at all, `correct` decides whether it came out right — with the guessing
+    removed. `score` has to infer the pairing from the order and the regexes,
+    because a file of answers carries nothing else; when the answers were
+    recorded as they were given, the pairing is known and inferring it can only
+    lose.
+
+    An item with no answer counts as unattempted, exactly like one answered with
+    some other construction: a block abandoned halfway is a shorter block, not a
+    failed one.
+    """
+    result = DrillResult(drill=drill)
+    for item in drill.items:
+        raw = answers.get(item.item_id)
+        text = normalize(raw) if raw is not None else ""
+        if raw is None or not item.attempted.search(text):
+            result.items.append(ItemResult(item, attempted=False, correct=False, answer=raw))
+            continue
+        result.items.append(ItemResult(item, attempted=True,
+                                       correct=bool(item.correct.search(text)), answer=raw))
+    return result
+
+
 # --- history -----------------------------------------------------------------
 
 @dataclass
@@ -337,37 +366,6 @@ class ItemRow:
     attempted: bool
     correct: bool
     condition: str = BLOCKED
-
-
-def _widen_header(path: Path, columns: list[str]) -> None:
-    """
-    Add columns to an existing history file, padding the rows already in it.
-
-    These files are append-only in the sense that matters — no row's values are
-    ever revised — but a column added later cannot be appended around: writing
-    nine fields under an eight-field header shifts every value in the new rows
-    one place left, and the history would read as corrupt rather than as
-    incomplete. So the header is rewritten once, old rows gaining an empty cell
-    that `load_history` reads as `blocked`, which is what they were.
-    """
-    if not path.exists():
-        return
-    with path.open("r", encoding="utf-8", newline="") as f:
-        rows = list(csv.reader(f))
-    if not rows or rows[0] == columns:
-        return
-    if rows[0] != columns[:len(rows[0])]:
-        raise ValueError(
-            f"{path} has an unexpected header {rows[0]} — refusing to migrate it. Expected "
-            f"the first {len(rows[0])} of {columns}."
-        )
-    width = len(columns)
-    padded = [row + [""] * (width - len(row)) for row in rows[1:]]
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(columns)
-        writer.writerows(padded)
-    logger.info("Added %d column(s) to %s", width - len(rows[0]), path)
 
 
 def record_result(history_path: Path, items_path: Path, *, date: str,
@@ -407,14 +405,7 @@ def record_result(history_path: Path, items_path: Path, *, date: str,
             "condition": condition,
         } for r in result.items]),
     ):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _widen_header(path, columns)
-        is_new = not path.exists()
-        with path.open("a", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=columns)
-            if is_new:
-                writer.writeheader()
-            writer.writerows(rows)
+        csvfile.append(path, columns, rows)
 
     logger.info("Recorded %s (%s): %d/%d", result.drill.name, condition,
                 result.correct, result.attempted)
@@ -619,6 +610,124 @@ def read_mixed_pending(path: Path) -> Optional[list[tuple[str, str]]]:
     return [(d, i) for d, i in pairs if d and i] or None
 
 
+# --- answers, recorded as they are given -------------------------------------
+#
+# The block is asked one prompt at a time across a conversation that then runs
+# for another half hour. Collecting the answers at the end means holding six of
+# them verbatim through everything that came after, and the failure is silent:
+# a paraphrased answer still scores, just not against what was said. So each one
+# is written down as it arrives, next to the sample it belongs to.
+#
+# It also pins each answer to its item. Scoring a list of answers has to work out
+# which item each one belongs to by matching structure, and a prompt answered
+# with some other construction can shift everything after it; recorded answers
+# carry the pairing already.
+
+@dataclass
+class PendingBlock:
+    """The sample handed out, plus whatever has been answered so far."""
+    mode: str
+    items: list[tuple[str, str]]        # (drill name, item id), in the order asked
+    answers: list[str]
+
+    @property
+    def complete(self) -> bool:
+        return len(self.answers) >= len(self.items)
+
+    @property
+    def pairs(self) -> list[tuple[str, str, str]]:
+        """(drill, item id, answer) for the items answered so far."""
+        return [(d, i, a) for (d, i), a in zip(self.items, self.answers)]
+
+
+def read_block(path: Path) -> Optional[PendingBlock]:
+    """Whatever is pending, mixed or blocked, in one shape."""
+    data = _read_pending(path)
+    if not data:
+        return None
+
+    answers = [a for a in data.get("answers") or [] if isinstance(a, str)]
+    if data.get("mode") == MIXED:
+        items = [(e.get("drill"), e.get("item_id")) for e in data.get("items") or []]
+        items = [(d, i) for d, i in items if d and i]
+        return PendingBlock(MIXED, items, answers) if items else None
+
+    name = data.get("drill")
+    ids = data.get("item_ids") or []
+    if not name or not ids:
+        return None
+    return PendingBlock(BLOCKED, [(name, item_id) for item_id in ids], answers)
+
+
+def record_answer(path: Path, answer: str) -> PendingBlock:
+    """Append one answer to the pending block, in the order the prompts were asked."""
+    block = read_block(path)
+    if block is None:
+        raise ValueError(
+            "No block is waiting for answers. Draw one first — `python -m voxlib.practice "
+            "start` opens the session with it."
+        )
+    if block.complete:
+        raise ValueError(
+            f"All {len(block.items)} prompts already have an answer. Score the block before "
+            f"drawing another."
+        )
+
+    data = _read_pending(path)
+    data["answers"] = block.answers + [answer]
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return read_block(path)
+
+
+def undo_answer(path: Path) -> Optional[str]:
+    """
+    Drop the last recorded answer and return it.
+
+    For an answer written down wrong, not for one the speaker went on to repair:
+    the drill measures what came out unprompted, so a corrected version scored in
+    place of the original would make every block read 100% and measure nothing.
+    """
+    block = read_block(path)
+    if block is None or not block.answers:
+        return None
+    data = _read_pending(path)
+    removed = block.answers[-1]
+    data["answers"] = block.answers[:-1]
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return removed
+
+
+def score_block(block: PendingBlock, drills: dict[str, Drill],
+                answers: Optional[list[str]] = None) -> dict[str, DrillResult]:
+    """
+    Score a pending block, one result per drill it spanned.
+
+    One row per drill rather than one per block, because the block is the
+    *condition* and the thing being tracked is still each pattern's own accuracy.
+
+    `answers` overrides what was recorded — the path for a block answered
+    somewhere that couldn't record as it went. Those are matched positionally by
+    `score`, with all the ambiguity that implies.
+    """
+    unknown = sorted({name for name, _ in block.items if name not in drills})
+    if unknown:
+        raise ValueError(f"The pending block names drills that no longer exist: {unknown}")
+
+    by_drill: dict[str, list[str]] = {}
+    for name, item_id in block.items:
+        by_drill.setdefault(name, []).append(item_id)
+
+    if answers is not None:
+        return {name: score(drills[name].subset(ids), answers)
+                for name, ids in by_drill.items()}
+
+    recorded: dict[str, dict[str, str]] = {}
+    for name, item_id, answer in block.pairs:
+        recorded.setdefault(name, {})[item_id] = answer
+    return {name: score_recorded(drills[name].subset(ids), recorded.get(name, {}))
+            for name, ids in by_drill.items()}
+
+
 # --- rendering ---------------------------------------------------------------
 
 def format_result(result: DrillResult) -> str:
@@ -720,10 +829,18 @@ def main(argv: list[str] | None = None) -> int:
                      help="Drill that must be in the mixed block whatever its impact "
                           "ranking — this session's focus. Repeatable.")
 
+    answer_cmd = sub.add_parser(
+        "answer", help="Record one answer to the pending block, as it is given")
+    answer_cmd.add_argument("text", nargs="?", help="What they said, verbatim")
+    answer_cmd.add_argument("--undo", action="store_true",
+                            help="Drop the last recorded answer (for one written down wrong, "
+                                 "not one they went on to repair)")
+
     score_cmd = sub.add_parser("score", help="Score the answers to the last prompts")
     score_cmd.add_argument("drill", nargs="?", help="Omit it when using --mixed")
-    score_cmd.add_argument("--answers", type=Path, required=True,
-                           help="Their answers, one per line, in the order asked")
+    score_cmd.add_argument("--answers", type=Path,
+                           help="Their answers in a file, one per line, in the order asked. "
+                                "Omit it to score the answers recorded by `answer`.")
     score_cmd.add_argument("--date", default=date_type.today().isoformat())
     score_cmd.add_argument("--notes", default="")
     score_cmd.add_argument("--mixed", action="store_true",
@@ -740,6 +857,8 @@ def main(argv: list[str] | None = None) -> int:
     mixed = getattr(args, "mixed", False)
 
     if args.command in {"next", "score", "items"}:
+        # `score` with neither a name nor --mixed scores whatever block is pending.
+        pending_driven = args.command == "score" and not mixed and not getattr(args, "drill", None)
         drills = {d.name: d for d in load_all(args.drills_dir)}
         if mixed:
             if args.drill:
@@ -747,6 +866,8 @@ def main(argv: list[str] | None = None) -> int:
                              "spans several drills by design.")
             if not drills:
                 parser.error(f"No drills in {args.drills_dir} to mix.")
+            drill = None
+        elif pending_driven:
             drill = None
         else:
             if not args.drill:
@@ -834,59 +955,77 @@ def main(argv: list[str] | None = None) -> int:
               "or not yet seen.")
         return 0
 
-    if args.command == "score" and mixed:
-        if not args.answers.exists():
-            parser.error(f"No answers file at {args.answers}.")
+    if args.command == "answer":
+        if args.undo:
+            removed = undo_answer(args.pending)
+            print(f"Removed: {removed}" if removed else "Nothing recorded to remove.")
+            return 0 if removed else 1
+        if not args.text:
+            parser.error("What did they say? Pass the answer, or --undo.")
+        try:
+            block = record_answer(args.pending, args.text)
+        except ValueError as error:
+            parser.error(str(error))
+        print(f"{len(block.answers)} of {len(block.items)} answered.")
+        if block.complete:
+            print("That's the block — score it with `python -m voxlib.practice end`.")
+        return 0
 
-        pending = read_mixed_pending(args.pending)
-        if not pending:
+    if args.command == "score":
+        answers = None
+        if args.answers:
+            if not args.answers.exists():
+                parser.error(f"No answers file at {args.answers}.")
+            answers = load_answers(args.answers)
+
+        block = read_block(args.pending)
+        if mixed and (block is None or block.mode != MIXED):
             parser.error("No mixed block is waiting to be scored. A mixed block can only be "
-                         "scored against the sample `next --mixed` handed out, since the "
-                         "answers have to be split between the patterns they belong to.")
+                         "scored against the sample it was drawn as, since the answers have "
+                         "to be split between the patterns they belong to.")
+        if drill is not None and block is not None:
+            # A pending sample for some other drill is not this drill's business.
+            if args.whole_drill or block.items[0][0] != drill.name:
+                block = None
 
-        unknown = sorted({name for name, _ in pending if name not in drills})
-        if unknown:
-            parser.error(f"The pending block names drills that no longer exist: {unknown}")
+        if block is None:
+            if drill is None:
+                parser.error("Nothing is waiting to be scored. Name a drill, or draw a block "
+                             "first — `python -m voxlib.practice start` opens the session "
+                             "with one.")
+            if answers is None:
+                parser.error("No answers recorded for this drill and no --answers file given.")
+            result = score(drill, answers)
+            print(format_result(result))
+            if not args.dry_run:
+                record_result(args.history, args.item_history, date=args.date,
+                              result=result, notes=args.notes)
+                print()
+                print(f"Recorded in {args.history}.")
+            return 0
 
-        answers = load_answers(args.answers)
-        by_drill: dict[str, list[str]] = {}
-        for name, item_id in pending:
-            by_drill.setdefault(name, []).append(item_id)
+        if answers is None and not block.answers:
+            parser.error("No answers have been recorded for the block. Record them as they "
+                         "are given with `answer \"<what they said>\"`, or pass --answers.")
+        try:
+            results = score_block(block, drills, answers)
+        except ValueError as error:
+            parser.error(str(error))
 
-        # One row per drill, not one per block: the block is the condition, and
-        # the thing being tracked is still each pattern's own accuracy.
-        for name, item_ids in by_drill.items():
-            result = score(drills[name].subset(item_ids), answers)
+        for result in results.values():
             print(format_result(result))
             print()
             if not args.dry_run:
                 record_result(args.history, args.item_history, date=args.date,
-                              result=result, notes=args.notes, condition=MIXED)
+                              result=result, notes=args.notes, condition=block.mode)
 
         if not args.dry_run:
+            # Cleared whether or not every prompt was answered: a sample left
+            # lying around would silently narrow the next block to prompts
+            # nobody was asked.
             args.pending.unlink(missing_ok=True)
-            print(f"Recorded {len(by_drill)} patterns from one mixed block in {args.history}.")
-        return 0
-
-    if args.command == "score":
-        if not args.answers.exists():
-            parser.error(f"No answers file at {args.answers}.")
-
-        pending = read_pending(args.pending, drill.name)
-        running = drill.subset(pending) if pending and not args.whole_drill else drill
-
-        result = score(running, load_answers(args.answers))
-        print(format_result(result))
-
-        if not args.dry_run:
-            record_result(args.history, args.item_history, date=args.date,
-                          result=result, notes=args.notes)
-            # Cleared whether or not it was used: a sample left lying around
-            # would silently narrow the next session to prompts nobody was asked.
-            if pending:
-                args.pending.unlink(missing_ok=True)
-            print()
-            print(f"Recorded in {args.history}.")
+            print(f"Recorded {len(results)} pattern(s) from one {block.mode} block in "
+                  f"{args.history}.")
         return 0
 
     print(format_history(load_history(args.history)))
