@@ -801,22 +801,39 @@ P25). Everything else here — `memory.md`, `mistakes.csv`, `fluency_history.csv
 
 At the start of every practice session, before the first question:
 
-P14. Try to read `analysis/memory.md` (`Current English Level`, `Current
-     Priorities`, `Persistent Grammar Mistakes`, `Focus For Next
-     Recording`, `Vocabulary To Replace`, `Useful Vocabulary Learned`) and
-     `analysis/conversation_focus_log.md` (see structure above), and run
-     `python -m voxlib.drill list` to see which categories have a drill and
-     `python -m voxlib.practice` for how the last few practice sessions went.
-     If any of these is missing or unreadable, say nothing and fall back to
-     normal topic selection (P10) and a B1+ starting difficulty (P8) —
-     never block on this.
+P14. **Open with one command:**
 
-     The practice table's `Typed` vs `Spoken` columns are worth a look before
-     picking the focus: a category that is already clean in typed production and
-     still failing in recordings doesn't need explaining here, it needs volume,
-     so prefer one that is failing on both sides when the schedule leaves you a
-     choice (P15's tie-break).
-P15. Pick ONE focus grammar pattern for the session:
+     ```bash
+     python -m voxlib.practice start
+     ```
+
+     It reads all five sources P14 used to ask for by hand — `memory.md`,
+     `conversation_focus_log.md`, `mistakes.csv`, `practice_history.csv` and the
+     drills — and prints the session brief: the CEFR estimate to calibrate
+     difficulty from (P8), this session's focus with the reason it was chosen
+     (P15), the words to ban and their replacements (P24), how the last practice
+     session went, rule 19's budget line, and the opening drill block already
+     drawn (P19). Nothing else needs reading before the first question.
+
+     Then read **only the `## <Mistake Name>` entry in `memory.md` for the focus
+     the brief chose** — its `Typical examples` and `Notes` are what makes a
+     correction specific to this speaker, and they are prose that no command can
+     usefully summarize. Skip the rest of the file.
+
+     If a file is missing the brief says so and carries on; it never blocks. A
+     brief with no focus means P15's first branch applies — normal topic
+     selection (P10), B1+ start (P8), no focus announcement (P16).
+
+     `python -m voxlib.practice` is still worth running when the brief's focus
+     line doesn't already answer it: its `Typed` vs `Spoken` columns say whether
+     a category is clean in typed production and still failing in recordings,
+     which needs volume rather than another explanation.
+P15. ONE focus grammar pattern per session. **`practice start` picks it** —
+     the rules below are what it applies, kept here because they are what the
+     choice means and because it can be overridden (`--focus-category
+     '<## Mistake Name>'`) when the owner asks for something specific. Don't
+     re-derive the choice by hand; if the brief's reasoning looks wrong, that's
+     a bug in `voxlib/brief.py`, not a step to redo manually.
      - If `Persistent Grammar Mistakes` has no entries yet (common in the
        first few sessions — a mistake only becomes "persistent" after
        recurring, see General rule 3), skip grammar-pattern selection
@@ -849,12 +866,12 @@ P15. Pick ONE focus grammar pattern for the session:
        wording — so `conversation_focus_log.md` stays keyed consistently
        instead of accumulating near-duplicate rows.
      - Regardless of whether a grammar pattern was found above — and even
-       when P15 fell back to normal topic selection — pick this session's
-       word constraints from `Vocabulary To Replace` as P24 describes. That
-       part is not optional and does not depend on a grammar pattern being
-       found. Occasionally (not every session), also work in one item from
-       `Useful Vocabulary Learned` to check retention — no tracking
-       needed, use judgment.
+       when P15 fell back to normal topic selection — this session's word
+       constraints still apply (P24). The brief prints them; that part is not
+       optional and does not depend on a grammar pattern being found.
+       Occasionally (not every session), also work in one item from `Useful
+       Vocabulary Learned` to check retention — that one is not in the brief,
+       so use judgment; no tracking needed.
      - If the chosen category has a drill, the session opens with it —
        see P19.
 P16. If a grammar pattern was found via P15, state the session's focus in
@@ -895,25 +912,23 @@ P18. At the end of the session, update (or create)
      still gets its `Last drilled` moved: it was tested.
 
 P19. **Open the session with a mixed block** — prompts from several patterns,
-     interleaved so no two in a row train the same frame:
+     interleaved so no two in a row train the same frame. **`practice start`
+     has already drawn it**: the prompts are at the bottom of the brief and the
+     sample is written to `drill_pending.json`, so there is nothing to run here.
 
-     ```bash
-     python -m voxlib.drill next --mixed --include "<focus-drill>"   # 6 prompts, 3 patterns
-     ```
-
-     `--include` pins this session's focus, because P15 picks it on a
-     spaced-repetition schedule that the impact ranking knows nothing about. The
-     other patterns come from the top of `python -m voxlib.mistakes`.
-
-     **Drop `--include` when the focus category has no drill — the block still
-     runs.** That is the difference between a session that measured something
-     and one that didn't: on 2026-08-13 and 2026-08-17 the focus category had no
-     drill, the block was skipped entirely under the old rule, and neither
-     session produced a single scored item.
+     It pins this session's focus into the block, because P15 picks the focus on
+     a spaced-repetition schedule that the impact ranking knows nothing about;
+     the other patterns come from the top of `python -m voxlib.mistakes`. **When
+     the focus category has no drill the block still runs**, from the
+     highest-impact patterns that do have one, and the brief says so. That is
+     the difference between a session that measured something and one that
+     didn't: on 2026-08-13 and 2026-08-17 the focus category had no drill, the
+     block was skipped entirely under the old rule, and neither session produced
+     a single scored item.
 
      A single-pattern block is still available, and is the right choice when a
      frame is being introduced for the first time and needs massing before it
-     can survive interleaving:
+     can survive interleaving — run it yourself, in place of the brief's block:
 
      ```bash
      python -m voxlib.drill next "<drill-name>"        # 5 prompts, one pattern
@@ -1018,10 +1033,13 @@ P23. **Two or three long turns per session, and count what was produced.**
      category, how many re-productions they did, and the drill score if there was
      a drill block — and record the same numbers (P25).
 P24. **Name two or three banned words and two or three required replacements
-     at the start, and hold them.** Take the banned side from `Vocabulary To
-     Replace` and from whatever the latest session report's Fluency section
-     names as the top discourse markers; take the replacements from the same
-     table's right-hand column.
+     at the start, and hold them.** `practice start` picks them out of
+     `Vocabulary To Replace`: one slot goes to whatever `Current Priorities`
+     already names (rule 17 reserves a place there for vocabulary, so the
+     ranking has been done), and the rest rotate through the table so the list
+     is a rota rather than the same two words forever. Swap one for a discourse
+     marker if the latest session report's Fluency section names a worse
+     offender.
 
      This is not decoration on top of the grammar focus. The largest measured
      problem in this speaker's English is not a grammar category: "you know"

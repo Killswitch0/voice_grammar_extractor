@@ -220,7 +220,7 @@ def format_table(sessions: list[PracticeSession], *,
         # rule-19 signal at its loudest, and suppressing it here would hide it in
         # exactly the state that most needs saying.
         return ("No practice sessions recorded yet. Say \"let's practice\" to run one.\n\n"
-                + _budget_line([], recording_dates or [], today))
+                + budget_line([], recording_dates or [], today))
 
     header = (f"{'Date':<12} {'Focus':<34} {'Words':>7} {'Errors':>7} {'Per 1k':>7} "
               f"{'Repro':>6} {'Long':>5}")
@@ -248,14 +248,16 @@ def format_table(sessions: list[PracticeSession], *,
                          "automatic — that needs volume, not another explanation.")
 
     lines.append("")
-    lines.append(_budget_line(sessions, recording_dates or [], today))
+    lines.append(budget_line(sessions, recording_dates or [], today))
     return "\n".join(lines)
 
 
-def _budget_line(sessions: list[PracticeSession], recording_dates: list[str],
-                 today: Optional[str]) -> str:
+def budget_line(sessions: list[PracticeSession], recording_dates: list[str],
+                today: Optional[str]) -> str:
     """
-    Rule 19's two counts, side by side.
+    Rule 19's two counts, side by side. Public because the session brief
+    (`voxlib.brief`) opens with it: the fortnight that contained six recordings
+    and no practice is the first thing a practice session should see.
 
     The recording is the instrument and the corrected repetitions are the
     treatment, and the failure mode the rule was written for is a report that
@@ -303,6 +305,25 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("show", help="Print the history (default)")
 
+    start = sub.add_parser(
+        "start",
+        help="Open a practice session: level, focus, banned words, drill block (P14-P24)")
+    start.add_argument("--date", default=date_type.today().isoformat())
+    start.add_argument("--memory", type=Path, default=analysis / "memory.md")
+    start.add_argument("--focus-log", type=Path,
+                       default=analysis / "conversation_focus_log.md")
+    start.add_argument("--drills-dir", type=Path, default=analysis.parent / "drills")
+    start.add_argument("--item-history", type=Path, default=analysis / "drill_items.csv")
+    start.add_argument("--pending", type=Path, default=analysis / "drill_pending.json")
+    start.add_argument("--focus-category", metavar="NAME",
+                       help="Override P15's choice — use the exact `## <Mistake Name>` heading")
+    start.add_argument("--count", type=int, default=None,
+                       help="Prompts in the opening block")
+    start.add_argument("--patterns", type=int, default=None,
+                       help="How many patterns the block spans")
+    start.add_argument("--no-drill", action="store_true",
+                       help="Brief only — don't draw a block or touch the pending file")
+
     add = sub.add_parser("add", help="Append one practice session")
     add.add_argument("--date", default=date_type.today().isoformat())
     add.add_argument("--focus", default="",
@@ -319,6 +340,25 @@ def main(argv: list[str] | None = None) -> int:
                          "Nothing at all means a clean session.")
 
     args = parser.parse_args(argv)
+
+    if args.command == "start":
+        from voxlib import brief as brief_module
+
+        print(brief_module.render(
+            today=args.date,
+            memory_path=args.memory,
+            focus_log_path=args.focus_log,
+            mistakes_path=args.mistakes,
+            practice_path=args.path,
+            drills_dir=args.drills_dir,
+            item_history=args.item_history,
+            pending=args.pending,
+            with_block=not args.no_drill,
+            block_size=args.count or brief_module.DEFAULT_BLOCK,
+            patterns=args.patterns or brief_module.DEFAULT_PATTERNS,
+            focus_override=args.focus_category,
+        ))
+        return 0
 
     if args.command == "add":
         errors: dict[str, int] = {}
