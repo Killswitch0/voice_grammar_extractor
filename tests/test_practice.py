@@ -434,3 +434,139 @@ def test_a_session_with_no_corrected_repetitions_says_so(tmp_path):
     outcome = _close(tmp_path, reproductions=0)
 
     assert "No corrected repetitions" in practice_module.format_outcome(outcome)
+
+
+# --- the word constraints (P24) ----------------------------------------------
+#
+# The banned words were announced every session and then nothing counted them, so
+# a phrase could be banned six sessions running with no way to tell whether that
+# was working — and `Vocabulary To Replace` could only ever grow, because nothing
+# said when a phrase had stopped being a habit.
+
+def _word_session(date, **words):
+    from voxlib.practice import WordResult
+
+    return PracticeSession(date=date, focus="", learner_words=300,
+                           vocabulary={p: WordResult(*counts) for p, counts in words.items()})
+
+
+def test_a_phrase_survives_the_round_trip_through_the_csv(tmp_path):
+    from voxlib import practice as practice_module
+    from voxlib.practice import WordResult
+
+    path = tmp_path / "practice.csv"
+    practice_module.record_session(path, date="2024-05-20", focus="", learner_words=300,
+                                   errors_by_category={},
+                                   vocabulary={"you know": WordResult(2, 0),
+                                               "super": WordResult(0, 3)})
+
+    loaded = practice_module.load(path)[0].vocabulary
+
+    assert loaded["you know"] == WordResult(2, 0)
+    assert loaded["super"].uses == 3
+
+
+def test_a_phrase_containing_the_separator_is_read_back_whole(tmp_path):
+    """The phrase comes first and can contain anything, so the counts are split
+    off from the right."""
+    from voxlib import practice as practice_module
+    from voxlib.practice import WordResult
+
+    path = tmp_path / "practice.csv"
+    practice_module.record_session(path, date="2024-05-20", focus="", learner_words=300,
+                                   errors_by_category={},
+                                   vocabulary={"like: as a filler": WordResult(1, 1)})
+
+    assert "like: as a filler" in practice_module.load(path)[0].vocabulary
+
+
+def test_rows_written_before_the_column_existed_still_load(tmp_path):
+    """Every history here has eventually needed a field nobody thought of; the
+    old rows have to keep reading as "not measured"."""
+    from voxlib import practice as practice_module
+
+    path = tmp_path / "practice.csv"
+    path.write_text("date,focus,learner_words,errors,error_breakdown,reproductions,long_turns,"
+                    "notes\n2024-05-18,Missing Article,300,1,Missing Article:1,2,1,\n",
+                    encoding="utf-8")
+
+    practice_module.record_session(path, date="2024-05-20", focus="", learner_words=300,
+                                   errors_by_category={}, vocabulary={})
+    sessions = practice_module.load(path)
+
+    assert len(sessions) == 2
+    assert sessions[0].vocabulary == {} and sessions[0].errors == 1
+
+
+def test_the_clean_streak_counts_back_from_the_most_recent_ban():
+    from voxlib import practice as practice_module
+
+    trends = {t.phrase: t for t in practice_module.vocabulary_trends([
+        _word_session("2024-05-10", super=(3, 0)),
+        _word_session("2024-05-12", super=(0, 2)),
+        _word_session("2024-05-14", super=(0, 3)),
+    ])}
+
+    assert trends["super"].clean_streak == 2
+    assert trends["super"].slips == 3 and trends["super"].uses == 5
+
+
+def test_a_slip_resets_the_streak_however_many_clean_sessions_came_before():
+    from voxlib import practice as practice_module
+
+    trends = {t.phrase: t for t in practice_module.vocabulary_trends([
+        _word_session("2024-05-10", super=(0, 2)),
+        _word_session("2024-05-12", super=(0, 2)),
+        _word_session("2024-05-14", super=(1, 2)),
+    ])}
+
+    assert trends["super"].clean_streak == 0
+
+
+def test_three_clean_sessions_with_replacements_earn_retirement():
+    from voxlib import practice as practice_module
+
+    trends = {t.phrase: t for t in practice_module.vocabulary_trends([
+        _word_session("2024-05-10", cool=(0, 2)),
+        _word_session("2024-05-12", cool=(0, 3)),
+        _word_session("2024-05-14", cool=(0, 1)),
+    ])}
+
+    assert trends["cool"].ready_to_retire
+
+
+def test_a_phrase_avoided_rather_than_replaced_does_not_earn_retirement():
+    """Zero slips with zero replacements is the slot being dodged, not the habit
+    changing — a different result that reads identically on the slip count."""
+    from voxlib import practice as practice_module
+
+    trends = {t.phrase: t for t in practice_module.vocabulary_trends([
+        _word_session("2024-05-10", stuff=(0, 0)),
+        _word_session("2024-05-12", stuff=(0, 0)),
+        _word_session("2024-05-14", stuff=(0, 0)),
+    ])}
+
+    assert trends["stuff"].clean_streak == 3
+    assert not trends["stuff"].ready_to_retire
+    assert "dodged" in practice_module.format_vocabulary(
+        practice_module.vocabulary_trends([_word_session("2024-05-10", stuff=(0, 0))]))
+
+
+def test_the_worst_offender_sorts_first():
+    from voxlib import practice as practice_module
+
+    trends = practice_module.vocabulary_trends([
+        _word_session("2024-05-10", cool=(0, 3), super=(4, 0), stuff=(1, 0)),
+    ])
+
+    assert [t.phrase for t in trends] == ["super", "stuff", "cool"]
+
+
+def test_the_counts_are_reported_when_a_session_closes(tmp_path):
+    from voxlib import practice as practice_module
+    from voxlib.practice import WordResult
+
+    outcome = _close(tmp_path, vocabulary={"super": WordResult(2, 1)})
+
+    assert "super: 2 slip(s), 1 replacement(s)" in practice_module.format_outcome(outcome)
+    assert practice_module.load(tmp_path / "practice.csv")[0].vocabulary["super"].slips == 2

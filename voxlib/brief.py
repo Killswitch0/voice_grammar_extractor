@@ -247,7 +247,8 @@ def choose_focus(candidates: list[str], log: dict[str, FocusRow],
 # --- choosing the words (P24) -------------------------------------------------
 
 def choose_vocabulary(items: list[VocabularyItem], priorities: list[str],
-                      rotation: int = 0, slots: int = VOCABULARY_SLOTS) -> list[VocabularyItem]:
+                      history: Optional[dict] = None, rotation: int = 0,
+                      slots: int = VOCABULARY_SLOTS) -> list[VocabularyItem]:
     """
     Which words to ban this session.
 
@@ -258,23 +259,47 @@ def choose_vocabulary(items: list[VocabularyItem], priorities: list[str],
     category in the table. Re-deciding it here would be a second, worse ranking
     of the same thing.
 
-    The remaining slots rotate through the table. Without rotation the same two
-    or three rows would be banned every session forever and the other dozen
-    would never be practised; with it, the list is a rota rather than a fossil.
-    The offset is the number of practice sessions already recorded, so it
-    advances on its own and two runs of this command on the same day agree.
+    The rest are ordered by what the practice history says about them
+    (`history` is `{phrase: WordTrend}` from `voxlib.practice`):
+
+    1. **Phrases that slipped last time they were banned.** The constraint isn't
+       holding yet, and a phrase dropped after one failed session is a phrase
+       nobody ever fixed.
+    2. **Phrases never banned yet**, rotated so the same row doesn't always come
+       up first. The offset is the number of practice sessions recorded, so it
+       advances on its own and two runs on the same day agree.
+    3. **Everything else, longest-untested first** — the rota, but ordered by
+       evidence instead of by position in a table.
+
+    A phrase that has earned retirement (clean for three banned sessions running,
+    with replacements actually produced) drops out of the running: it has a slot
+    on `Vocabulary To Replace` it no longer needs, and spending a session on it
+    is a session not spent on something still costing something. It stays in the
+    table until the next recording analysis takes it out by hand — this mode
+    never writes to `memory.md`.
     """
     if not items or slots <= 0:
         return []
 
+    history = history or {}
     priority_text = " ".join(priorities).lower()
     pinned = next((i for i in items if len(i.word) > 2 and i.word.lower() in priority_text), None)
 
     rest = [i for i in items if i is not pinned]
-    offset = rotation % len(rest) if rest else 0
-    rotated = rest[offset:] + rest[:offset]
+    retired = [i for i in rest if getattr(history.get(i.word), "ready_to_retire", False)]
+    running = [i for i in rest if i not in retired]
 
-    chosen = ([pinned] if pinned else []) + rotated
+    untested = [i for i in running if i.word not in history]
+    offset = rotation % len(untested) if untested else 0
+    untested = untested[offset:] + untested[:offset]
+
+    tested = [i for i in running if i.word in history]
+    slipping = [i for i in tested if history[i.word].clean_streak == 0]
+    slipping.sort(key=lambda i: -history[i.word].slips)
+    holding = [i for i in tested if history[i.word].clean_streak > 0]
+    holding.sort(key=lambda i: history[i.word].last_banned)
+
+    chosen = ([pinned] if pinned else []) + slipping + untested + holding + retired
     return chosen[:slots]
 
 
@@ -336,6 +361,7 @@ class Brief:
     block: Optional[Block]
     last_session: str
     budget: str
+    word_history: dict = field(default_factory=dict)   # phrase -> practice.WordTrend
     typed_vs_spoken: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -404,7 +430,9 @@ def build(*, today: str, memory_path: Path, focus_log_path: Path, mistakes_path:
         except Exception:
             logger.warning("Could not match a drill to %s", focus.category, exc_info=True)
 
-    vocabulary = choose_vocabulary(memory.vocabulary, memory.priorities, rotation=len(sessions))
+    word_history = {t.phrase: t for t in practice_module.vocabulary_trends(sessions)}
+    vocabulary = choose_vocabulary(memory.vocabulary, memory.priorities, word_history,
+                                   rotation=len(sessions))
 
     block = None
     if with_block:
@@ -447,6 +475,7 @@ def build(*, today: str, memory_path: Path, focus_log_path: Path, mistakes_path:
         cefr=memory.cefr,
         focus=focus,
         vocabulary=vocabulary,
+        word_history=word_history,
         block=block,
         last_session=last_session,
         budget=practice_module.budget_line(sessions, recording_dates, today),
@@ -489,7 +518,15 @@ def format_brief(brief: Brief) -> str:
     if brief.vocabulary:
         lines.append(label("Ban") + " · ".join(v.word for v in brief.vocabulary))
         for v in brief.vocabulary:
-            lines.append(label("") + f"{v.word} → {v.replacement}")
+            record = brief.word_history.get(v.word)
+            if record is None:
+                note = "never banned before"
+            elif record.clean_streak:
+                note = (f"clean {record.clean_streak} session(s), {record.uses} "
+                        f"replacement(s) produced")
+            else:
+                note = f"slipped {record.slips}x over {record.sessions} session(s)"
+            lines.append(label("") + f"{v.word} → {v.replacement}  ({note})")
 
     lines += ["", label("Last session") + brief.last_session, label("Budget") + brief.budget]
 

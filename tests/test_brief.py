@@ -245,6 +245,67 @@ def test_the_vocabulary_item_named_in_priorities_is_pinned():
     assert len(chosen) == 3
 
 
+class _WordTrend:
+    """Enough of `practice.WordTrend` for the selection to order on."""
+
+    def __init__(self, slips=0, uses=0, clean_streak=0, last_banned="2024-05-01",
+                 ready_to_retire=False):
+        self.slips = slips
+        self.uses = uses
+        self.clean_streak = clean_streak
+        self.last_banned = last_banned
+        self.ready_to_retire = ready_to_retire
+
+
+def test_a_phrase_that_slipped_last_time_comes_back_first():
+    """A constraint dropped after one failed session is a constraint nobody ever
+    made hold."""
+    items = [VocabularyItem(w, "x") for w in ("holding", "slipping", "fresh")]
+    history = {"holding": _WordTrend(clean_streak=2, uses=3),
+               "slipping": _WordTrend(slips=4, clean_streak=0)}
+
+    chosen = brief.choose_vocabulary(items, [], history, slots=1)
+
+    assert chosen[0].word == "slipping"
+
+
+def test_a_phrase_that_has_earned_retirement_stops_taking_a_slot():
+    items = [VocabularyItem(w, "x") for w in ("retired", "fresh")]
+    history = {"retired": _WordTrend(clean_streak=3, uses=5, ready_to_retire=True)}
+
+    chosen = brief.choose_vocabulary(items, [], history, slots=1)
+
+    assert chosen[0].word == "fresh"
+
+
+def test_a_phrase_holding_up_yields_to_one_never_tested():
+    items = [VocabularyItem(w, "x") for w in ("holding", "fresh")]
+    history = {"holding": _WordTrend(clean_streak=1, uses=2)}
+
+    chosen = brief.choose_vocabulary(items, [], history, slots=1)
+
+    assert chosen[0].word == "fresh"
+
+
+def test_the_priority_slot_is_pinned_even_when_the_phrase_is_holding_up():
+    """Rule 17's reserved slot outranks the schedule: if the analysis still names
+    it, it is still what is costing the most."""
+    items = [VocabularyItem("very (intensifier)", "genuinely"), VocabularyItem("fresh", "x")]
+    history = {"very": _WordTrend(clean_streak=2, uses=4)}
+
+    chosen = brief.choose_vocabulary(items, ['"Very" as a universal intensifier'],
+                                     history, slots=1)
+
+    assert chosen[0].word == "very"
+
+
+def test_the_brief_says_what_each_banned_phrase_has_done_so_far(tmp_path, memory_file):
+    result = _build(tmp_path, memory_path=memory_file)
+    rendered = brief.format_brief(result)
+
+    assert "never banned before" in rendered
+
+
 def test_the_unpinned_slots_rotate_so_the_list_is_a_rota_not_a_fossil():
     items = [VocabularyItem(w, "x") for w in ("a", "b", "c", "d", "e")]
 

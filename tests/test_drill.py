@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from voxlib import drill
+from voxlib import csvfile, drill
 from voxlib.drill import Drill, DrillItem, ItemRow
 
 # Engine and CLI tests run against invented content. The real drills are built
@@ -685,7 +685,7 @@ def test_a_header_that_is_not_an_older_version_of_this_file_is_refused(tmp_path:
     history.write_text("when,what\n2026-08-10,something\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="refusing to migrate"):
-        drill._widen_header(history, drill.HISTORY_COLUMNS)
+        csvfile.widen_header(history, drill.HISTORY_COLUMNS)
 
 
 def test_the_history_warns_when_one_drill_was_asked_under_both_conditions():

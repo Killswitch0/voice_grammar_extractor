@@ -54,6 +54,8 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
+from voxlib import csvfile
+
 logger = logging.getLogger(__name__)
 
 HISTORY_COLUMNS = [
@@ -65,13 +67,26 @@ HISTORY_COLUMNS = [
     "reproductions",
     "long_turns",
     "notes",
+    # Appended after `notes` rather than beside the other counts: a column added
+    # to an append-only file can only go on the end, or the rows already in it
+    # would have to be rewritten to stay aligned. See `voxlib.csvfile`.
+    "vocabulary",
 ]
 
 # Errors and words are separated by a colon in the breakdown, sessions by a
 # semicolon: "Article Errors:3;Redundant Reflexive Pronoun:1". A CSV cell rather
 # than its own file because nothing joins on it — it is read whole or not at all.
+# The vocabulary cell works the same way with one more field: the banned phrase,
+# how many times it slipped out anyway, and how many times a replacement was
+# produced instead — "you know:2:0;super:0:3".
 _CATEGORY_SEPARATOR = ";"
 _COUNT_SEPARATOR = ":"
+
+# How many consecutive sessions a banned phrase has to survive untouched before
+# it has stopped being a habit. Three, matching the absence streak `mistakes.csv`
+# uses to promote a grammar category — the same claim about the same speaker
+# deserves the same evidence.
+CLEAN_SESSIONS_TO_RETIRE = 3
 
 # The window the budget line covers. Two weeks, because rule 19 budgets in weeks
 # ("roughly two recordings a week") and a single week is short enough that one
@@ -92,6 +107,7 @@ class PracticeSession:
     errors_by_category: dict[str, int] = field(default_factory=dict)
     reproductions: int = 0
     long_turns: int = 0
+    vocabulary: dict[str, "WordResult"] = field(default_factory=dict)
     notes: str = ""
 
     @property
@@ -105,6 +121,48 @@ class PracticeSession:
         if self.learner_words <= 0:
             return None
         return round(self.errors * 1000 / self.learner_words, 2)
+
+
+@dataclass
+class WordResult:
+    """One banned phrase's session: how often it slipped out, and how often
+    something better was produced in its place.
+
+    Both numbers, because either alone is misleading. Zero slips with zero
+    replacements is usually avoidance — the sentence was rebuilt to dodge the
+    slot rather than filled with a better word — and that is not the same result
+    as zero slips with five replacements, which is the habit actually changing.
+    """
+    slips: int = 0
+    uses: int = 0
+
+    @property
+    def clean(self) -> bool:
+        return self.slips == 0
+
+
+def _format_vocabulary(words: dict[str, WordResult]) -> str:
+    return _CATEGORY_SEPARATOR.join(
+        f"{phrase}{_COUNT_SEPARATOR}{r.slips}{_COUNT_SEPARATOR}{r.uses}"
+        for phrase, r in sorted(words.items())
+    )
+
+
+def _parse_vocabulary(raw: str) -> dict[str, WordResult]:
+    words: dict[str, WordResult] = {}
+    for entry in raw.split(_CATEGORY_SEPARATOR):
+        entry = entry.strip()
+        if not entry:
+            continue
+        # Split from the right, twice: the phrase comes first and may contain
+        # anything, including the separator.
+        head, _, uses = entry.rpartition(_COUNT_SEPARATOR)
+        phrase, _, slips = head.rpartition(_COUNT_SEPARATOR)
+        try:
+            words[phrase.strip()] = WordResult(slips=int(slips), uses=int(uses))
+        except ValueError:
+            logger.warning("Ignoring unreadable vocabulary entry %r", entry)
+    return words
 
 
 def _format_breakdown(errors: dict[str, int]) -> str:
@@ -140,6 +198,7 @@ def load(path: Path) -> list[PracticeSession]:
                 errors_by_category=_parse_breakdown(raw.get("error_breakdown") or ""),
                 reproductions=int(raw.get("reproductions") or 0),
                 long_turns=int(raw.get("long_turns") or 0),
+                vocabulary=_parse_vocabulary(raw.get("vocabulary") or ""),
                 notes=(raw.get("notes") or "").strip(),
             ))
     sessions.sort(key=lambda s: s.date)
@@ -148,7 +207,8 @@ def load(path: Path) -> list[PracticeSession]:
 
 def record_session(path: Path, *, date: str, focus: str, learner_words: int,
                    errors_by_category: dict[str, int], reproductions: int = 0,
-                   long_turns: int = 0, notes: str = "") -> None:
+                   long_turns: int = 0, vocabulary: Optional[dict[str, WordResult]] = None,
+                   notes: str = "") -> None:
     """
     Appends one practice session.
 
@@ -169,22 +229,17 @@ def record_session(path: Path, *, date: str, focus: str, learner_words: int,
     if negative:
         raise ValueError(f"Negative error counts for: {negative}")
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    is_new = not path.exists()
-    with path.open("a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=HISTORY_COLUMNS)
-        if is_new:
-            writer.writeheader()
-        writer.writerow({
-            "date": date,
-            "focus": focus,
-            "learner_words": learner_words,
-            "errors": sum(errors_by_category.values()),
-            "error_breakdown": _format_breakdown(errors_by_category),
-            "reproductions": reproductions,
-            "long_turns": long_turns,
-            "notes": notes,
-        })
+    csvfile.append(path, HISTORY_COLUMNS, [{
+        "date": date,
+        "focus": focus,
+        "learner_words": learner_words,
+        "errors": sum(errors_by_category.values()),
+        "error_breakdown": _format_breakdown(errors_by_category),
+        "reproductions": reproductions,
+        "long_turns": long_turns,
+        "vocabulary": _format_vocabulary(vocabulary or {}),
+        "notes": notes,
+    }])
 
     logger.info("Recorded a practice session for %s: %d words, %d errors", date,
                 learner_words, sum(errors_by_category.values()))
@@ -215,7 +270,8 @@ class SessionOutcome:
 
 def close_session(*, date: str, focus: str, learner_words: int,
                   errors_by_category: dict[str, int], reproductions: int = 0,
-                  long_turns: int = 0, notes: str = "", history_path: Path,
+                  long_turns: int = 0, vocabulary: Optional[dict[str, WordResult]] = None,
+                  notes: str = "", history_path: Path,
                   focus_log_path: Path, pending: Path, drills_dir: Path,
                   drill_history: Path, drill_item_history: Path,
                   dry_run: bool = False) -> SessionOutcome:
@@ -240,7 +296,7 @@ def close_session(*, date: str, focus: str, learner_words: int,
     outcome = SessionOutcome(session=PracticeSession(
         date=date, focus=focus, learner_words=learner_words,
         errors_by_category=dict(errors_by_category), reproductions=reproductions,
-        long_turns=long_turns, notes=notes))
+        long_turns=long_turns, vocabulary=dict(vocabulary or {}), notes=notes))
 
     # 1. The block. `missed` is per category, because that is what the schedule
     #    is keyed on — a drill is an implementation of a category, not a peer.
@@ -295,7 +351,7 @@ def close_session(*, date: str, focus: str, learner_words: int,
     if not dry_run:
         record_session(history_path, date=date, focus=focus, learner_words=learner_words,
                        errors_by_category=errors_by_category, reproductions=reproductions,
-                       long_turns=long_turns, notes=notes)
+                       long_turns=long_turns, vocabulary=vocabulary, notes=notes)
 
     return outcome
 
@@ -321,6 +377,11 @@ def format_outcome(outcome: SessionOutcome, *, dry_run: bool = False) -> str:
         lines.append("  No corrected repetitions this session — that is the failure rule 19 "
                      "describes (P22), not a clean run.")
 
+    if session.vocabulary:
+        lines.append("  " + ", ".join(
+            f"{phrase}: {r.slips} slip(s), {r.uses} replacement(s)"
+            for phrase, r in sorted(session.vocabulary.items())))
+
     if outcome.changes:
         lines.append("")
         lines.append("Schedule:")
@@ -330,6 +391,67 @@ def format_outcome(outcome: SessionOutcome, *, dry_run: bool = False) -> str:
         lines.append("")
         lines += [f"! {note}" for note in outcome.notes]
     return "\n".join(lines)
+
+
+# --- the word constraints (P24) ----------------------------------------------
+#
+# The largest measured problem in this speaker's English has never been a grammar
+# category — a single connector can outrun every tracked pattern in `mistakes.csv`
+# put together, and evaluative vocabulary collapses into two or three
+# intensifiers. P24 answers that by banning two or three phrases per session and
+# requiring replacements, which is production rather than the suggestion a report
+# can only make.
+#
+# What it had no way to answer is whether the constraint held. A banned word was
+# announced and then nothing counted it, so "you know" could be banned in six
+# consecutive sessions with no way to tell whether that was working, and the list
+# in `memory.md` could only ever grow: nothing said when a phrase had stopped
+# being a habit and could come off it.
+
+@dataclass
+class WordTrend:
+    phrase: str
+    sessions: int          # sessions this phrase was banned in
+    slips: int
+    uses: int
+    clean_streak: int      # consecutive most recent banned sessions with no slip
+    last_banned: str
+
+    @property
+    def ready_to_retire(self) -> bool:
+        """Clean for long enough to come off `Vocabulary To Replace`.
+
+        Replacements are required as well as slips being absent: a phrase avoided
+        by never going near the slot is a phrase still in charge of the sentence.
+        """
+        return self.clean_streak >= CLEAN_SESSIONS_TO_RETIRE and self.uses > 0
+
+
+def vocabulary_trends(sessions: list[PracticeSession]) -> list[WordTrend]:
+    """Per-phrase totals, worst first — most slips, then least practised."""
+    banned: dict[str, list[tuple[str, WordResult]]] = {}
+    for session in sessions:
+        for phrase, result in session.vocabulary.items():
+            banned.setdefault(phrase, []).append((session.date, result))
+
+    trends = []
+    for phrase, history in banned.items():
+        streak = 0
+        for _, result in reversed(history):
+            if not result.clean:
+                break
+            streak += 1
+        trends.append(WordTrend(
+            phrase=phrase,
+            sessions=len(history),
+            slips=sum(r.slips for _, r in history),
+            uses=sum(r.uses for _, r in history),
+            clean_streak=streak,
+            last_banned=history[-1][0],
+        ))
+
+    trends.sort(key=lambda t: (-t.slips, t.uses, t.phrase))
+    return trends
 
 
 def practice_rates(sessions: list[PracticeSession],
@@ -389,8 +511,38 @@ def format_table(sessions: list[PracticeSession], *,
                          "explain it. Clean typed and failing spoken: it's known and not "
                          "automatic — that needs volume, not another explanation.")
 
+    vocabulary = format_vocabulary(vocabulary_trends(sessions))
+    if vocabulary:
+        lines += ["", vocabulary]
+
     lines.append("")
     lines.append(budget_line(sessions, recording_dates or [], today))
+    return "\n".join(lines)
+
+
+def format_vocabulary(trends: list[WordTrend]) -> str:
+    """The banned-word record: whether the constraint held, and whether anything
+    replaced the phrase rather than the sentence simply being rebuilt around it."""
+    if not trends:
+        return ""
+
+    lines = ["Word constraints (P24) — how often the ban held, and whether anything "
+             "replaced the phrase:",
+             f"  {'Phrase':<28} {'Banned':>7} {'Slips':>6} {'Used':>6} {'Clean':>6}"]
+    for t in trends:
+        star = " *" if t.ready_to_retire else ""
+        lines.append(f"  {t.phrase[:28]:<28} {t.sessions:>8} {t.slips:>6} {t.uses:>6} "
+                     f"{t.clean_streak:>6}{star}")
+
+    retired = [t.phrase for t in trends if t.ready_to_retire]
+    if retired:
+        lines.append(f"  * clean for {CLEAN_SESSIONS_TO_RETIRE} banned sessions running with "
+                     f"replacements actually produced — candidates to drop from "
+                     f"`Vocabulary To Replace`: {', '.join(retired)}")
+    avoided = [t.phrase for t in trends if t.clean_streak and not t.uses]
+    if avoided:
+        lines.append(f"  Clean but with no replacement produced, which is usually the slot "
+                     f"being dodged rather than filled: {', '.join(avoided)}")
     return "\n".join(lines)
 
 
@@ -475,6 +627,10 @@ def main(argv: list[str] | None = None) -> int:
                      help="Words the learner produced this session — the denominator")
     end.add_argument("--reproductions", type=int, default=0, help="P22 re-productions")
     end.add_argument("--long-turns", type=int, default=0, help="P23 long turns")
+    end.add_argument("--word", action="append", default=[], metavar="PHRASE:SLIPS:USED",
+                     help="One per banned phrase (P24): how many times it slipped out, and "
+                          'how many times a replacement was produced. e.g. "you know:2:0". '
+                          "Repeatable.")
     end.add_argument("--notes", default="")
     end.add_argument("--focus-log", type=Path, default=analysis / "conversation_focus_log.md")
     end.add_argument("--drills-dir", type=Path, default=analysis.parent / "drills")
@@ -534,11 +690,21 @@ def main(argv: list[str] | None = None) -> int:
             errors[category] = int(count)
 
     if args.command == "end":
+        words: dict[str, WordResult] = {}
+        for raw in args.word:
+            head, _, used = raw.rpartition(_COUNT_SEPARATOR)
+            phrase, _, slips = head.rpartition(_COUNT_SEPARATOR)
+            if not phrase or not slips.strip().isdigit() or not used.strip().isdigit():
+                parser.error(f'Expected "phrase:slips:used", got {raw!r}')
+            if phrase in words:
+                parser.error(f"{phrase!r} is listed twice — add the counts up instead.")
+            words[phrase] = WordResult(slips=int(slips), uses=int(used))
+
         try:
             outcome = close_session(
                 date=args.date, focus=args.focus, learner_words=args.words,
                 errors_by_category=errors, reproductions=args.reproductions,
-                long_turns=args.long_turns, notes=args.notes,
+                long_turns=args.long_turns, vocabulary=words, notes=args.notes,
                 history_path=args.path, focus_log_path=args.focus_log,
                 pending=args.pending, drills_dir=args.drills_dir,
                 drill_history=args.drill_history, drill_item_history=args.drill_items,

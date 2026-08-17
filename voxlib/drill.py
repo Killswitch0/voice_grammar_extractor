@@ -73,6 +73,8 @@ from datetime import date as date_type
 from pathlib import Path
 from typing import Optional
 
+from voxlib import csvfile
+
 logger = logging.getLogger(__name__)
 
 # One row per attempt — what step 4b of the analysis workflow reads.
@@ -366,37 +368,6 @@ class ItemRow:
     condition: str = BLOCKED
 
 
-def _widen_header(path: Path, columns: list[str]) -> None:
-    """
-    Add columns to an existing history file, padding the rows already in it.
-
-    These files are append-only in the sense that matters — no row's values are
-    ever revised — but a column added later cannot be appended around: writing
-    nine fields under an eight-field header shifts every value in the new rows
-    one place left, and the history would read as corrupt rather than as
-    incomplete. So the header is rewritten once, old rows gaining an empty cell
-    that `load_history` reads as `blocked`, which is what they were.
-    """
-    if not path.exists():
-        return
-    with path.open("r", encoding="utf-8", newline="") as f:
-        rows = list(csv.reader(f))
-    if not rows or rows[0] == columns:
-        return
-    if rows[0] != columns[:len(rows[0])]:
-        raise ValueError(
-            f"{path} has an unexpected header {rows[0]} — refusing to migrate it. Expected "
-            f"the first {len(rows[0])} of {columns}."
-        )
-    width = len(columns)
-    padded = [row + [""] * (width - len(row)) for row in rows[1:]]
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(columns)
-        writer.writerows(padded)
-    logger.info("Added %d column(s) to %s", width - len(rows[0]), path)
-
-
 def record_result(history_path: Path, items_path: Path, *, date: str,
                   result: DrillResult, notes: str = "",
                   condition: str = BLOCKED) -> None:
@@ -434,14 +405,7 @@ def record_result(history_path: Path, items_path: Path, *, date: str,
             "condition": condition,
         } for r in result.items]),
     ):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _widen_header(path, columns)
-        is_new = not path.exists()
-        with path.open("a", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=columns)
-            if is_new:
-                writer.writeheader()
-            writer.writerows(rows)
+        csvfile.append(path, columns, rows)
 
     logger.info("Recorded %s (%s): %d/%d", result.drill.name, condition,
                 result.correct, result.attempted)

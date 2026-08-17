@@ -642,6 +642,15 @@ adding/updating/moving entries):
   first (long-unused "Vocabulary To Replace" entries, or basic "Useful
   Vocabulary Learned" items the owner clearly already uses naturally)
   rather than letting the list grow forever.
+
+  **Which rows to drop is now evidence rather than a guess.** Run
+  `python -m voxlib.practice` and read the word-constraint table: a phrase
+  starred there has been banned in three consecutive practice sessions without
+  slipping *and* with replacements actually produced, which is the closest thing
+  this project has to "that habit is gone". Take starred phrases off the table
+  first. A phrase clean but with no replacement produced is flagged separately
+  and is **not** a candidate — that is the slot being avoided, not filled, and
+  dropping it would retire a habit that is still in charge of the sentence.
 - Append one row to "Conversation History."
 - Update "Current Priorities" based on this session's action plan — rank it by
   the `Impact` column from step 6 (rule 15), not by raw occurrence count alone,
@@ -1048,8 +1057,10 @@ P24. **Name two or three banned words and two or three required replacements
      at the start, and hold them.** `practice start` picks them out of
      `Vocabulary To Replace`: one slot goes to whatever `Current Priorities`
      already names (rule 17 reserves a place there for vocabulary, so the
-     ranking has been done), and the rest rotate through the table so the list
-     is a rota rather than the same two words forever. Swap one for a discourse
+     ranking has been done), and the rest are ordered by what the practice
+     history says — a phrase that slipped last time it was banned comes back
+     first, phrases never banned yet rotate in next, and one holding up waits.
+     The brief prints each phrase's record next to it. Swap one for a discourse
      marker if the latest session report's Fluency section names a worse
      offender.
 
@@ -1066,12 +1077,27 @@ P24. **Name two or three banned words and two or three required replacements
 
      Never more than three banned words at once. The constraint has to be
      holdable while talking, which is General rule 20's logic applied here.
+
+     **Count both sides and pass them to `practice end` (P25):** how many times
+     each banned phrase slipped out anyway, and how many times a replacement was
+     produced instead. Both, because either alone misleads — zero slips with
+     zero replacements is usually the slot being dodged rather than filled, and
+     that is not the same result as zero slips with five replacements. Rough
+     counts are fine; a count is a denominator and no count is not.
+
+     `python -m voxlib.practice` then shows the record per phrase, and stars the
+     ones clean for three banned sessions running *with* replacements actually
+     produced. Those are candidates to drop from `Vocabulary To Replace` — the
+     one signal that list never had, which is why it could only ever grow.
+     Removing a row is recording-analysis work (step 6b); this mode never writes
+     to `memory.md`.
 P25. **Close the session with one command, before you finish it:**
 
      ```bash
      python -m voxlib.practice end --date YYYY-MM-DD --focus "<## Mistake Name>" \
        --words <words they produced> --reproductions <P22 count> \
-       --long-turns <P23 count> "Article Errors:3" "Redundant Reflexive Pronoun:1"
+       --long-turns <P23 count> --word "you know:2:0" --word "super:0:3" \
+       "Article Errors:3" "Redundant Reflexive Pronoun:1"
      ```
 
      It does the three things that used to be three steps: scores the drill
@@ -1090,6 +1116,9 @@ P25. **Close the session with one command, before you finish it:**
        exact `## <Mistake Name>` headings (the same join key rule P15 uses for
        the focus log). Errors outside any tracked category: leave them out of the
        counts and mention them in `--notes`.
+     - One `--word "phrase:slips:replacements"` per banned phrase (P24), using
+       the phrase exactly as the brief printed it — that string is the join key
+       across sessions, the same way the headings are for grammar.
      - No arguments at all means a clean session, and that is worth writing —
        an unlogged session and a clean one look identical afterwards.
      - Never edit `analysis/practice_history.csv` by hand.
