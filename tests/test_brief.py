@@ -23,7 +23,8 @@ from pathlib import Path
 import pytest
 
 from voxlib import brief
-from voxlib.brief import FocusRow, VocabularyItem
+from voxlib.brief import VocabularyItem
+from voxlib.focus_log import FocusRow
 
 TODAY = "2024-05-20"
 
@@ -153,16 +154,6 @@ def test_a_missing_memory_file_is_empty_rather_than_fatal(tmp_path):
     memory = brief.parse_memory(tmp_path / "nothing.md")
 
     assert memory.persistent == [] and not memory.usable
-
-
-def test_the_focus_log_is_read_as_a_table(tmp_path):
-    path = tmp_path / "log.md"
-    path.write_text(FOCUS_LOG, encoding="utf-8")
-
-    log = brief.parse_focus_log(path)
-
-    assert log["Missing Article"] == FocusRow("Missing Article", "2024-05-14", 0, "2024-05-15")
-    assert log["Wrong Preposition After A Verb"].streak == 3
 
 
 # --- choosing the focus (P15) -------------------------------------------------
@@ -339,7 +330,7 @@ def test_the_command_it_prints_can_actually_be_run(tmp_path, memory_file):
 
     result = _build(tmp_path, memory_path=memory_file, focus_override=QUOTED_CATEGORY)
     line = next(line for line in brief.format_brief(result).splitlines()
-                if "practice add" in line)
+                if "practice end" in line)
 
     assert QUOTED_CATEGORY in shlex.split(line.rstrip("\\"))
 

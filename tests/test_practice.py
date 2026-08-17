@@ -272,3 +272,165 @@ def test_an_unreadable_mistake_history_costs_the_comparison_not_the_table(tmp_pa
 
     assert "2026-08-17" in out
     assert "Attended vs unmonitored" not in out
+
+
+# --- closing a session -------------------------------------------------------
+#
+# Three steps used to be run by hand at the point where the session was already
+# over: score the block, append the row, move the schedule on. Each one is silent
+# when skipped, and they share their inputs — whether a pattern held up is the
+# drill result *and* the conversation errors, and neither step could see both.
+
+DRILLS_DIR = Path(__file__).parent / "fixtures" / "drills"
+DRILLED_CATEGORY = "Test Article Choice"    # a-or-an.yaml
+OTHER_CATEGORY = "Test Verb Agreement"      # verb-s.yaml
+
+
+def _close(tmp_path: Path, **overrides):
+    from voxlib import practice as practice_module
+
+    arguments = dict(
+        date="2024-05-20", focus=DRILLED_CATEGORY, learner_words=400,
+        errors_by_category={}, reproductions=2, long_turns=2, notes="",
+        history_path=tmp_path / "practice.csv",
+        focus_log_path=tmp_path / "log.md",
+        pending=tmp_path / "pending.json",
+        drills_dir=DRILLS_DIR,
+        drill_history=tmp_path / "drills.csv",
+        drill_item_history=tmp_path / "drill_items.csv",
+    )
+    arguments.update(overrides)
+    return practice_module.close_session(**arguments)
+
+
+def _block(tmp_path: Path, *answers, count: int = 2) -> None:
+    from voxlib import drill as drill_module
+
+    drill_module.main(["--drills-dir", str(DRILLS_DIR),
+                       "--pending", str(tmp_path / "pending.json"),
+                       "--mistakes", str(tmp_path / "none.csv"),
+                       "next", "--mixed", "--count", str(count)])
+    for answer in answers:
+        drill_module.record_answer(tmp_path / "pending.json", answer)
+
+
+def test_closing_a_session_scores_the_block_and_writes_both_files(tmp_path):
+    from voxlib import drill as drill_module, focus_log, practice as practice_module
+
+    _block(tmp_path, "I have an apple.", "She teaches English.")
+
+    outcome = _close(tmp_path)
+
+    assert drill_module.load_history(tmp_path / "drills.csv"), "the block went unscored"
+    assert practice_module.load(tmp_path / "practice.csv")[0].learner_words == 400
+    assert focus_log.load(tmp_path / "log.md")[DRILLED_CATEGORY].last_drilled == "2024-05-20"
+    assert not (tmp_path / "pending.json").exists()
+    assert outcome.session.errors == 0
+
+
+def test_a_miss_in_the_block_resets_the_streak_like_any_other_error(tmp_path):
+    """P18: it is the same pattern failing, under an easier condition."""
+    from voxlib import focus_log
+
+    _block(tmp_path, "I have a apple.", "She teaches English.")
+
+    _close(tmp_path)
+    rows = focus_log.load(tmp_path / "log.md")
+
+    assert rows[DRILLED_CATEGORY].streak == 0
+    assert rows[DRILLED_CATEGORY].next_due == "2024-05-21"
+    assert rows[OTHER_CATEGORY].streak == 1
+
+
+def test_an_error_in_conversation_resets_a_pattern_the_block_got_right(tmp_path):
+    """The two sources are read together, which is the reason to do these steps
+    in one place at all."""
+    from voxlib import focus_log
+
+    _block(tmp_path, "I have an apple.", "She teaches English.")
+
+    _close(tmp_path, errors_by_category={DRILLED_CATEGORY: 2})
+
+    assert focus_log.load(tmp_path / "log.md")[DRILLED_CATEGORY].streak == 0
+
+
+def test_every_pattern_the_block_asked_about_is_logged_not_only_the_focus(tmp_path):
+    from voxlib import focus_log
+
+    _block(tmp_path, "I have an apple.", "She teaches English.")
+
+    _close(tmp_path)
+
+    assert set(focus_log.load(tmp_path / "log.md")) == {DRILLED_CATEGORY, OTHER_CATEGORY}
+
+
+def test_a_category_that_was_never_tested_keeps_its_schedule(tmp_path):
+    """An error made in conversation on a pattern nothing tested says nothing
+    about when that pattern is next due."""
+    from voxlib import focus_log
+
+    _block(tmp_path, "I have an apple.", "She teaches English.")
+
+    outcome = _close(tmp_path, errors_by_category={"Some Untested Category": 1})
+
+    assert "Some Untested Category" not in focus_log.load(tmp_path / "log.md")
+    assert any("unchanged" in note for note in outcome.notes)
+
+
+def test_an_unanswered_block_is_left_pending_rather_than_scored_as_zero(tmp_path):
+    from voxlib import drill as drill_module
+
+    _block(tmp_path)
+
+    outcome = _close(tmp_path)
+
+    assert not drill_module.load_history(tmp_path / "drills.csv")
+    assert (tmp_path / "pending.json").exists(), "an unasked block should survive to be asked"
+    assert any("no answers were recorded" in note for note in outcome.notes)
+
+
+def test_a_session_with_no_block_still_records(tmp_path):
+    from voxlib import focus_log, practice as practice_module
+
+    outcome = _close(tmp_path, errors_by_category={DRILLED_CATEGORY: 1})
+
+    assert practice_module.load(tmp_path / "practice.csv")
+    assert focus_log.load(tmp_path / "log.md")[DRILLED_CATEGORY].streak == 0
+    assert any("No drill block" in note for note in outcome.notes)
+
+
+def test_a_session_with_no_words_is_refused_before_anything_is_written(tmp_path):
+    """Two files disagreeing about whether a session happened is worse than a
+    refused command."""
+    from voxlib import drill as drill_module
+
+    _block(tmp_path, "I have an apple.", "She teaches English.")
+
+    with pytest.raises(ValueError):
+        _close(tmp_path, learner_words=0)
+
+    assert not drill_module.load_history(tmp_path / "drills.csv")
+    assert not (tmp_path / "practice.csv").exists()
+    assert not (tmp_path / "log.md").exists()
+
+
+def test_a_dry_run_writes_nothing(tmp_path):
+    _block(tmp_path, "I have an apple.", "She teaches English.")
+
+    outcome = _close(tmp_path, dry_run=True)
+
+    assert outcome.changes, "a dry run should still say what it would do"
+    assert not (tmp_path / "practice.csv").exists()
+    assert not (tmp_path / "drills.csv").exists()
+    assert not (tmp_path / "log.md").exists()
+    assert (tmp_path / "pending.json").exists()
+
+
+def test_a_session_with_no_corrected_repetitions_says_so(tmp_path):
+    """Rule 19's whole argument: a practice session that produced none of them
+    is the failure, not a clean run."""
+    from voxlib import practice as practice_module
+
+    outcome = _close(tmp_path, reproductions=0)
+
+    assert "No corrected repetitions" in practice_module.format_outcome(outcome)

@@ -43,6 +43,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from voxlib import focus_log
+from voxlib.focus_log import FocusRow
+
 logger = logging.getLogger(__name__)
 
 # How many prompts the opening block asks, and across how many patterns. Both
@@ -105,20 +108,6 @@ def _section(text: str, heading: str) -> str:
     return rest[: following.start()] if following else rest
 
 
-def _table_rows(section: str) -> list[list[str]]:
-    """Markdown table rows, minus the header and the `|---|` separator."""
-    rows = []
-    for line in section.splitlines():
-        line = line.strip()
-        if not line.startswith("|"):
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        if not cells or all(set(c) <= {"-", ":"} for c in cells if c):
-            continue
-        rows.append(cells)
-    return rows[1:] if rows else []
-
-
 def _trim_note(cell: str) -> str:
     """The suggestion without the running commentary after it.
 
@@ -160,46 +149,12 @@ def parse_memory(path: Path) -> Memory:
 
     vocabulary = [
         VocabularyItem(phrase=re.sub(r"\*+", "", row[0]).strip(), replacement=_trim_note(row[1]))
-        for row in _table_rows(_section(text, "Vocabulary To Replace"))
+        for row in focus_log.table_rows(_section(text, "Vocabulary To Replace"))
         if len(row) >= 2 and row[0]
     ]
 
     return Memory(cefr=cefr, persistent=persistent, priorities=priorities,
                   vocabulary=vocabulary)
-
-
-# --- the focus log ------------------------------------------------------------
-
-@dataclass
-class FocusRow:
-    category: str
-    last_drilled: str
-    streak: int
-    next_due: str
-
-
-def parse_focus_log(path: Path) -> dict[str, FocusRow]:
-    """`conversation_focus_log.md`'s table, keyed by category.
-
-    Still markdown, still written by hand at the end of a session (P18). Read
-    here rather than migrated, because this command only needs to *read* it —
-    turning it into data belongs with whatever ends up writing it."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-
-    rows: dict[str, FocusRow] = {}
-    for cells in _table_rows(text):
-        if len(cells) < 4 or not cells[0]:
-            continue
-        try:
-            streak = int(cells[2])
-        except ValueError:
-            streak = 0
-        rows[cells[0]] = FocusRow(category=cells[0], last_drilled=cells[1],
-                                  streak=streak, next_due=cells[3])
-    return rows
 
 
 # --- choosing the focus (P15) -------------------------------------------------
@@ -394,7 +349,7 @@ def build(*, today: str, memory_path: Path, focus_log_path: Path, mistakes_path:
     from voxlib import practice as practice_module
 
     memory = parse_memory(memory_path)
-    log = parse_focus_log(focus_log_path)
+    log = focus_log.load(focus_log_path)
     notes: list[str] = []
 
     trends: dict = {}
@@ -550,20 +505,20 @@ def format_brief(brief: Brief) -> str:
         lines.append("")
         lines += [f"! {note}" for note in brief.notes]
 
-    lines += ["", "-" * 72, "At the end of the session:"]
+    lines += ["", "-" * 72]
     if brief.block:
-        lines.append("  python -m voxlib.drill score --mixed --answers <their answers, one "
-                     "per line>")
+        lines.append("Record each answer as it is given, before you correct it:")
+        lines.append('  python -m voxlib.drill answer "<what they said, verbatim>"')
+        lines.append("")
     # shlex, because half the category names contain double quotes of their own
-    # — `Verb Complementation With "Propose"/"Allow"` pasted between quotes is a
-    # broken command, and a copy-pasteable line that doesn't run is worse than no
-    # line at all.
+    # — a heading pasted between quotes is a broken command, and a
+    # copy-pasteable line that doesn't run is worse than no line at all.
     focus_name = shlex.quote(brief.focus.category if brief.focus else "")
-    lines.append(f"  python -m voxlib.practice add --date {brief.date} --focus {focus_name} "
+    lines.append("At the end — scores the block, writes the row, moves the schedule on "
+                 "(P18, P25):")
+    lines.append(f"  python -m voxlib.practice end --date {brief.date} --focus {focus_name} "
                  f"\\\n      --words <their words> --reproductions <P22> --long-turns <P23> "
                  f"'Category:count'")
-    lines.append("  then update analysis/conversation_focus_log.md for every pattern the "
-                 "block asked about (P18).")
     return "\n".join(lines)
 
 

@@ -190,6 +190,148 @@ def record_session(path: Path, *, date: str, focus: str, learner_words: int,
                 learner_words, sum(errors_by_category.values()))
 
 
+# --- closing a session --------------------------------------------------------
+#
+# Three things have to happen at the end of a practice session, and they were
+# three separate manual steps: score the drill block, append the row below, and
+# move every drilled pattern on in `conversation_focus_log.md`. All three land at
+# the point where the session is already over — the moment at which a step is
+# most likely to be skipped, and skipping any one of them is silent. An unscored
+# block leaves `drill_pending.json` to be overwritten by the next session; an
+# unwritten row makes a session that happened indistinguishable from one that
+# didn't; a focus log left alone brings every pattern back on the wrong day.
+#
+# They also share their inputs, which is the real argument for doing them
+# together: whether a pattern held up this session is the drill result *and* the
+# conversation errors, and neither step could see both.
+
+@dataclass
+class SessionOutcome:
+    session: PracticeSession
+    scored: dict[str, object] = field(default_factory=dict)    # drill name -> DrillResult
+    changes: list = field(default_factory=list)                # focus_log.Change
+    notes: list[str] = field(default_factory=list)
+
+
+def close_session(*, date: str, focus: str, learner_words: int,
+                  errors_by_category: dict[str, int], reproductions: int = 0,
+                  long_turns: int = 0, notes: str = "", history_path: Path,
+                  focus_log_path: Path, pending: Path, drills_dir: Path,
+                  drill_history: Path, drill_item_history: Path,
+                  dry_run: bool = False) -> SessionOutcome:
+    """
+    Score the block, write the row, move the schedule on.
+
+    The order is deliberate: everything that can be refused is refused before
+    anything is written. A session rejected for having no word count after its
+    drill scores were already recorded would leave two files disagreeing about
+    whether the session happened.
+    """
+    from voxlib import drill as drill_module
+    from voxlib import focus_log
+
+    if learner_words <= 0:
+        raise ValueError(
+            f"learner_words must be positive, got {learner_words}. Errors without a word "
+            f"count cannot be normalized, which makes them uncomparable with mistakes.csv "
+            f"and with every other practice session."
+        )
+
+    outcome = SessionOutcome(session=PracticeSession(
+        date=date, focus=focus, learner_words=learner_words,
+        errors_by_category=dict(errors_by_category), reproductions=reproductions,
+        long_turns=long_turns, notes=notes))
+
+    # 1. The block. `missed` is per category, because that is what the schedule
+    #    is keyed on — a drill is an implementation of a category, not a peer.
+    missed: dict[str, bool] = {}
+    block = drill_module.read_block(pending)
+    if block is None:
+        outcome.notes.append("No drill block was pending — nothing to score.")
+    elif not block.answers:
+        outcome.notes.append(
+            f"A block of {len(block.items)} prompts was drawn but no answers were recorded, "
+            f"so it can't be scored. Record them as they are given next time "
+            f"(`python -m voxlib.drill answer \"...\"`). Leaving it pending.")
+    else:
+        drills = {d.name: d for d in drill_module.load_all(drills_dir)}
+        outcome.scored = drill_module.score_block(block, drills)
+        if not block.complete:
+            outcome.notes.append(
+                f"Only {len(block.answers)} of {len(block.items)} prompts were answered — "
+                f"the rest count as unattempted, not as errors.")
+        for name, result in outcome.scored.items():
+            category = drills[name].category
+            wrong = any(r.attempted and not r.correct for r in result.items)
+            missed[category] = missed.get(category, False) or wrong
+            if not dry_run:
+                drill_module.record_result(drill_history, drill_item_history, date=date,
+                                           result=result, notes=notes, condition=block.mode)
+        if not dry_run:
+            pending.unlink(missing_ok=True)
+
+    # 2. The schedule. P18: a pattern the block asked about was tested, whether
+    #    or not it came up anywhere else, and a miss in the block counts the same
+    #    as one made mid-conversation.
+    drilled = {category: not wrong for category, wrong in missed.items()}
+    if focus:
+        drilled.setdefault(focus, True)
+    for category in list(drilled):
+        if errors_by_category.get(category, 0) > 0:
+            drilled[category] = False
+
+    untested = sorted(set(errors_by_category) - set(drilled))
+    if untested:
+        outcome.notes.append(
+            f"Not tested by the block and not this session's focus, so their schedule is "
+            f"unchanged (P18): {', '.join(untested)}.")
+
+    if not dry_run:
+        outcome.changes = focus_log.record(focus_log_path, drilled, date)
+    else:
+        _, outcome.changes = focus_log.apply(focus_log.load(focus_log_path), drilled, date)
+
+    # 3. The row.
+    if not dry_run:
+        record_session(history_path, date=date, focus=focus, learner_words=learner_words,
+                       errors_by_category=errors_by_category, reproductions=reproductions,
+                       long_turns=long_turns, notes=notes)
+
+    return outcome
+
+
+def format_outcome(outcome: SessionOutcome, *, dry_run: bool = False) -> str:
+    from voxlib import drill as drill_module
+
+    session = outcome.session
+    lines = [f"{'Would close' if dry_run else 'Closed'} {session.date}"
+             f"{f' — focus: {session.focus}' if session.focus else ''}", ""]
+
+    for name, result in outcome.scored.items():
+        lines.append(drill_module.format_result(result))
+        lines.append("")
+
+    rate = "—" if session.rate_per_1000 is None else f"{session.rate_per_1000:.2f}/1k"
+    lines.append(f"{session.learner_words} words · {session.errors} errors ({rate}) · "
+                 f"{session.reproductions} re-productions · {session.long_turns} long turns")
+    if session.errors_by_category:
+        lines.append("  " + ", ".join(f"{c} {n}" for c, n in
+                                      sorted(session.errors_by_category.items())))
+    if not session.reproductions:
+        lines.append("  No corrected repetitions this session — that is the failure rule 19 "
+                     "describes (P22), not a clean run.")
+
+    if outcome.changes:
+        lines.append("")
+        lines.append("Schedule:")
+        lines += [f"  {change}" for change in outcome.changes]
+
+    if outcome.notes:
+        lines.append("")
+        lines += [f"! {note}" for note in outcome.notes]
+    return "\n".join(lines)
+
+
 def practice_rates(sessions: list[PracticeSession],
                    window: int = COMPARISON_SESSIONS) -> dict[str, float]:
     """
@@ -324,6 +466,27 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--no-drill", action="store_true",
                        help="Brief only — don't draw a block or touch the pending file")
 
+    end = sub.add_parser(
+        "end", help="Close a session: score the block, write the row, move the schedule on")
+    end.add_argument("--date", default=date_type.today().isoformat())
+    end.add_argument("--focus", default="",
+                     help="The `## <Mistake Name>` heading drilled, or free text if none")
+    end.add_argument("--words", type=int, required=True,
+                     help="Words the learner produced this session — the denominator")
+    end.add_argument("--reproductions", type=int, default=0, help="P22 re-productions")
+    end.add_argument("--long-turns", type=int, default=0, help="P23 long turns")
+    end.add_argument("--notes", default="")
+    end.add_argument("--focus-log", type=Path, default=analysis / "conversation_focus_log.md")
+    end.add_argument("--drills-dir", type=Path, default=analysis.parent / "drills")
+    end.add_argument("--drill-history", type=Path, default=analysis / "drills.csv")
+    end.add_argument("--drill-items", type=Path, default=analysis / "drill_items.csv")
+    end.add_argument("--pending", type=Path, default=analysis / "drill_pending.json")
+    end.add_argument("--dry-run", action="store_true",
+                     help="Print what would be written without writing it")
+    end.add_argument("errors", nargs="*", metavar="CATEGORY:COUNT",
+                     help='One per category that produced an error, e.g. "Article Errors:3". '
+                          "Nothing at all means a clean session.")
+
     add = sub.add_parser("add", help="Append one practice session")
     add.add_argument("--date", default=date_type.today().isoformat())
     add.add_argument("--focus", default="",
@@ -360,7 +523,7 @@ def main(argv: list[str] | None = None) -> int:
         ))
         return 0
 
-    if args.command == "add":
+    if args.command in {"add", "end"}:
         errors: dict[str, int] = {}
         for raw in args.errors:
             category, _, count = raw.rpartition(_COUNT_SEPARATOR)
@@ -370,6 +533,22 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(f"{category!r} is listed twice — add the counts up instead.")
             errors[category] = int(count)
 
+    if args.command == "end":
+        try:
+            outcome = close_session(
+                date=args.date, focus=args.focus, learner_words=args.words,
+                errors_by_category=errors, reproductions=args.reproductions,
+                long_turns=args.long_turns, notes=args.notes,
+                history_path=args.path, focus_log_path=args.focus_log,
+                pending=args.pending, drills_dir=args.drills_dir,
+                drill_history=args.drill_history, drill_item_history=args.drill_items,
+                dry_run=args.dry_run)
+        except ValueError as error:
+            parser.error(str(error))
+        print(format_outcome(outcome, dry_run=args.dry_run))
+        return 0
+
+    if args.command == "add":
         try:
             record_session(args.path, date=args.date, focus=args.focus,
                            learner_words=args.words, errors_by_category=errors,

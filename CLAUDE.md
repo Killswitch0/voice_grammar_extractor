@@ -672,8 +672,8 @@ Note the division of labour between the history files:
 | `scores_history.csv` | you, by hand | your judgment calls — CEFR and the four 0-10 scores |
 | `mistakes.csv` | you, via `python -m voxlib.mistakes add` (step 6) | which mistakes occurred how often, per session |
 | `fluency_history.csv` | the pipeline | how the recording came out and how it was spoken |
-| `drills.csv` / `drill_items.csv` | `python -m voxlib.drill score` | drill attempts and per-item results — the only scores with a known denominator |
-| `practice_history.csv` | `python -m voxlib.practice add`, in practice mode (P25) | typed practice: words produced, errors, corrected repetitions — attended production, the rung between a drill and a recording |
+| `drills.csv` / `drill_items.csv` | `python -m voxlib.practice end` (P25) | drill attempts and per-item results — the only scores with a known denominator |
+| `practice_history.csv` | `python -m voxlib.practice end`, in practice mode (P25) | typed practice: words produced, errors, corrected repetitions — attended production, the rung between a drill and a recording |
 
 You own the first two. `fluency_history.csv`, the drill files and
 `practice_history.csv` you only ever read — don't edit or append to them by hand.
@@ -780,10 +780,11 @@ never write to `analysis/memory.md`. That file's scores need to stay
 comparable from session to session for the recording-analysis workflow
 above; mixing in typed-dialogue practice would break that.
 
-Two files this mode does own and does write: `analysis/conversation_focus_log.md`
-(the schedule, P18) and `analysis/practice_history.csv` (what actually happened,
-P25). Everything else here — `memory.md`, `mistakes.csv`, `fluency_history.csv`
-— is read-only.
+Two files this mode does own and does write, both through
+`python -m voxlib.practice end` rather than by hand:
+`analysis/conversation_focus_log.md` (the schedule, P18) and
+`analysis/practice_history.csv` (what actually happened, P25). Everything else
+here — `memory.md`, `mistakes.csv`, `fluency_history.csv` — is read-only.
 
 `analysis/conversation_focus_log.md` structure (owned only by this mode):
 
@@ -887,29 +888,31 @@ P16. If a grammar pattern was found via P15, state the session's focus in
 P17. When a correction (📌 Why) matches the session's focus pattern, or any
      other pattern named in `memory.md`, name it explicitly, e.g. "this is
      your recurring Article Errors pattern." Otherwise correct normally.
-P18. At the end of the session, update (or create)
-     `analysis/conversation_focus_log.md` for the mistake-category
-     heading(s) actually drilled this session (per P15) — update the
-     existing row rather than duplicating it. For each drilled pattern:
-     - Set `Last drilled` to today.
-     - If it held up with no error during this session, increment
-       `Correct streak` by 1 and set `Next due` to today +
-       `min(2^Correct streak, 14)` days — the gap stretches out the
+P18. `analysis/conversation_focus_log.md` holds the spaced-repetition schedule,
+     and **`python -m voxlib.practice end` writes it** (P25) — never edit it by
+     hand. The rules it applies, because they are what the numbers mean:
+     - `Last drilled` becomes today for every pattern the session tested.
+     - A pattern that held up with no error increments `Correct streak` and is
+       next due in `min(2^Correct streak, 14)` days — the gap stretches out the
        longer it keeps holding up.
-     - If it still produced an error this session, reset `Correct streak`
-       to 0 and set `Next due` to tomorrow — a mistake that resurfaces
-       needs re-checking soon, not a longer gap.
-     Skip this step if P15 fell back to normal topic selection — there's
-     no formal pattern to log.
+     - A pattern that produced an error resets `Correct streak` to 0 and is due
+       tomorrow — a mistake that resurfaces needs re-checking soon, not a
+       longer gap.
 
      A miss in the P19 drill block counts as "produced an error this
      session" for the streak, the same as one made mid-conversation. It is
-     the same pattern failing, under an easier condition.
+     the same pattern failing, under an easier condition — and `end` is the one
+     place that can see both sources, which is why the two steps are one command.
 
      A mixed block covers two patterns besides the focus, and those were
-     drilled too — log a row for each pattern the block actually asked about,
-     not only for the focus. A pattern that came up nowhere else in the session
-     still gets its `Last drilled` moved: it was tested.
+     drilled too — every pattern the block actually asked about gets a row, not
+     only the focus. A pattern that came up nowhere else in the session still
+     gets its `Last drilled` moved: it was tested. A pattern that produced an
+     error in conversation but that nothing tested keeps its schedule; `end`
+     lists those rather than moving them.
+
+     If P15 fell back to normal topic selection there is no pattern to log —
+     pass no `--focus` and the schedule is left alone.
 
 P19. **Open the session with a mixed block** — prompts from several patterns,
      interleaved so no two in a row train the same frame. **`practice start`
@@ -946,14 +949,23 @@ P19. **Open the session with a mixed block** — prompts from several patterns,
      focus line names the session's focus, not the pattern behind prompt 4.
      Correct from your own knowledge of English, not from an answer key.
 
-     At the end, write their answers to a scratch file, one per line in the
-     order asked, and record the attempt:
+     **Write each answer down as it arrives, before correcting it:**
 
      ```bash
-     python -m voxlib.drill score --mixed --answers <file>
-     # or, after a single-pattern block:
-     python -m voxlib.drill score "<drill-name>" --answers <file>
+     python -m voxlib.drill answer "<what they said, verbatim>"
      ```
+
+     Verbatim, and their first attempt — not the version they produce after the
+     correction. Recording as you go is what stops six answers having to be held
+     in mind through the half hour of conversation that follows, where a
+     paraphrase still scores and scores the wrong thing. It also pins each answer
+     to the item it belongs to, so nothing has to be re-derived from the order.
+     `answer --undo` drops the last one, for an answer written down wrong.
+
+     The block is then scored by `python -m voxlib.practice end` (P25) along with
+     everything else; there is no separate scoring step. `drill score --answers
+     <file>` still exists for a block whose answers weren't recorded as they were
+     given.
 
      **Expect a lower score under `--mixed`, and don't report it as a
      regression.** The four blocked attempts on record all scored 100% while
@@ -1054,13 +1066,23 @@ P24. **Name two or three banned words and two or three required replacements
 
      Never more than three banned words at once. The constraint has to be
      holdable while talking, which is General rule 20's logic applied here.
-P25. **Record the session before you finish it:**
+P25. **Close the session with one command, before you finish it:**
 
      ```bash
-     python -m voxlib.practice add --date YYYY-MM-DD --focus "<## Mistake Name>" \
+     python -m voxlib.practice end --date YYYY-MM-DD --focus "<## Mistake Name>" \
        --words <words they produced> --reproductions <P22 count> \
        --long-turns <P23 count> "Article Errors:3" "Redundant Reflexive Pronoun:1"
      ```
+
+     It does the three things that used to be three steps: scores the drill
+     block from the answers recorded during it (P19), appends the row below, and
+     moves every drilled pattern on in `conversation_focus_log.md` (P18). They
+     belong together because they share their inputs — whether a pattern held up
+     is the block result *and* the conversation errors, and no step run alone
+     could see both. Its output is what P23 asks to be reported in chat.
+
+     `--dry-run` prints what it would write without writing it. `practice add`
+     still exists for a session with no block and nothing to schedule.
 
      - `--words` counts **their** words, not the whole dialogue. Estimate it from
        their answers; a rough count is a denominator, and no count is not.
@@ -1228,30 +1250,34 @@ analysis/
   fluency_history.csv    append-only, written by the PIPELINE, never by hand: filler rate,
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Read it in step 4; don't edit it.
-  drills.csv             append-only, written by `python -m voxlib.drill score`: one row
+  drills.csv             append-only, written by `python -m voxlib.practice end` (or
+                           `drill score`): one row
                            per drill attempt — items, attempted, correct, the pool's
                            fingerprint, and whether it was asked blocked or mixed. The only
                            score here with a denominator. Read it in step 4b; don't edit it.
   drill_items.csv        append-only, same writer: one row per item per attempt, so
                            "which prompt keeps failing" is answerable and the next sample
                            can lead with it. Read via `python -m voxlib.drill items`.
-  drill_pending.json     the sample `drill show` last handed out, waiting to be scored.
+  drill_pending.json     the sample the session opened with, plus the answers recorded
+                           against it so far (`drill answer`), waiting to be scored.
                            Machine state, cleared automatically; don't edit it.
   processed.json         written by the PIPELINE: which recordings have already been
                            transcribed (matched by content, not filename). Guards against
                            merging the same audio into two sessions. Don't edit it.
   practice_history.csv   append-only, written by Conversation Practice Mode via
-                           `python -m voxlib.practice add` (P25): one row per practice
+                           `python -m voxlib.practice end` (P25): one row per practice
                            session — words produced, errors by category, corrected
                            repetitions, long turns. Attended production: the rung between
                            "knows the form" (drills.csv) and "produces it unmonitored"
                            (mistakes.csv). Read via `python -m voxlib.practice`.
-  conversation_focus_log.md   written only by Conversation Practice Mode (see below) —
-                               tracks which memory.md patterns have been drilled in
-                               dialogue, when, and on a spaced-repetition schedule
-                               (Last drilled / Correct streak / Next due). Recording
-                               analysis mode reads it for context (step 3) but never
-                               writes to it.
+  conversation_focus_log.md   written only by Conversation Practice Mode, via
+                               `python -m voxlib.practice end` (P18) — never by hand:
+                               which memory.md patterns have been drilled in dialogue,
+                               when, and on a spaced-repetition schedule (Last drilled /
+                               Correct streak / Next due). Current state rather than
+                               history, which is why it is a short document and not a
+                               CSV. Recording analysis mode reads it for context
+                               (step 3) but never writes to it.
   sessions/
     YYYY-MM-DD.txt              archived raw clean transcript for that day
     YYYY-MM-DD.annotated.txt    archived annotated transcript (has the [?] markers)
