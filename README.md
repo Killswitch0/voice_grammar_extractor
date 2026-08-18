@@ -9,7 +9,8 @@ The app **never sends anything to any AI itself** — it only prepares
 `transcript_clean.txt`, which you paste into a chat with an AI yourself.
 
 **Beyond a one-off review:** this project also ships a Claude Code workflow
-(`CLAUDE.md`) that turns repeated recordings into an actual coaching loop —
+(`CLAUDE.md`, and the skills in `.claude/skills/`) that turns repeated
+recordings into an actual coaching loop —
 tracking which mistakes keep recurring, which have improved, and which came
 back, in a persistent `analysis/memory.md`. See `HOW_IT_WORKS.md` for the
 full picture, or jump to ["Tracking progress over
@@ -392,7 +393,8 @@ accumulates on its own without anyone maintaining it by hand.
 ## Tracking progress over time with Claude Code
 
 Pasting `transcript_clean.txt` into an AI once gives you a one-off review.
-`CLAUDE.md` sets up a full personal-coach workflow instead: open this
+The `analyze-recording` skill sets up a full personal-coach workflow
+instead: open this
 project folder in Claude Code and ask it to "analyze the new recording." It
 will archive the session's transcript under `analysis/sessions/`, produce a
 coaching report (CEFR estimate, ranked mistakes, natural-English rewrites,
@@ -404,8 +406,9 @@ improved, and what to focus on next.
 A `[?]` marker in `transcript_annotated.txt` (see "Output" above) means
 low-confidence recognition — the coaching workflow is instructed to exclude
 those lines from grammar judgment rather than guess whether a "mistake" is
-real or just Whisper mishearing you. See `CLAUDE.md` for the full workflow
-and the exact `memory.md` format.
+real or just Whisper mishearing you. See
+`.claude/skills/analyze-recording/SKILL.md` for the full workflow and the exact
+`memory.md` format.
 
 `analysis/` is excluded from this project's own repo (see `.gitignore`) —
 it's your personal data, not something to publish alongside the code. That
@@ -541,6 +544,11 @@ Scenarios can't be scored by pattern — *"Does that affect us?"* and *"Is our
 service affected?"* are both right — so each one carries three or four written
 yes/no criteria instead, and the count of them is the denominator. `17/20
 criteria` means the same thing next month.
+
+Every scenario you run is recorded in `analysis/asking_scenarios.csv` — which
+ones, which criteria they met and which failed — so the next session leads with
+what you have never tried and what went wrong last time, instead of whatever
+comes first in the file.
 
 ### Where it lives
 

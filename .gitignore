@@ -25,11 +25,17 @@ analysis/asking_memory.md
 analysis/asking_drills.csv
 analysis/asking_drill_items.csv
 analysis/asking_pending.json
+analysis/asking_archive.md
+analysis/asking_scenarios.csv
 analysis/.gitignore
 analysis/drills/
 
 # Secrets
 .env
+
+# Claude Code — the skills are the project's instructions and belong in the repo;
+# the local settings file is this machine's own.
+.claude/settings.local.json
 
 # Python
 __pycache__/

@@ -299,6 +299,7 @@ class SessionOutcome:
     session: PracticeSession
     scored: dict[str, object] = field(default_factory=dict)    # drill name -> DrillResult
     changes: list = field(default_factory=list)                # focus_log.Change
+    scenarios: list = field(default_factory=list)              # asking.ScenarioRun
     notes: list[str] = field(default_factory=list)
 
 
@@ -308,6 +309,10 @@ def close_session(*, date: str, focus: str, learner_words: int,
                   notes: str = "", mode: str = ANSWER_MODE, history_path: Path,
                   focus_log_path: Path, pending: Path, drills_dir: Path,
                   drill_history: Path, drill_item_history: Path,
+                  scenarios: Optional[list[str]] = None,
+                  scenarios_dir: Optional[Path] = None,
+                  scenario_history: Optional[Path] = None,
+                  asking_memory: Optional[Path] = None,
                   dry_run: bool = False) -> SessionOutcome:
     """
     Score the block, write the row, move the schedule on.
@@ -329,6 +334,19 @@ def close_session(*, date: str, focus: str, learner_words: int,
 
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}.")
+
+    runs = []
+    if scenarios:
+        from voxlib import asking as asking_module
+
+        if mode != ASK_MODE:
+            raise ValueError(
+                "Scenario results only come from Question Practice Mode — pass --mode ask, "
+                "or drop the --scenario arguments."
+            )
+        pool = {s.name: s for s in asking_module.load_scenarios(scenarios_dir)} \
+            if scenarios_dir else {}
+        runs = [asking_module.parse_run(spec, pool, date) for spec in scenarios]
 
     outcome = SessionOutcome(session=PracticeSession(
         date=date, focus=focus, learner_words=learner_words,
@@ -390,6 +408,31 @@ def close_session(*, date: str, focus: str, learner_words: int,
                        errors_by_category=errors_by_category, reproductions=reproductions,
                        long_turns=long_turns, vocabulary=vocabulary, notes=notes, mode=mode)
 
+    # 4. The scenarios (Q10, Q16). Last, because it is the step that can be
+    #    absent: an answering session has none, and an asking session that ended
+    #    after the block has none either.
+    if runs:
+        from voxlib import asking as asking_module
+
+        outcome.scenarios = runs
+        total = sum(r.criteria_total for r in runs)
+        met = sum(r.criteria_met for r in runs)
+        outcome.notes.append(f"{len(runs)} scenario(s), {met}/{total} criteria met.")
+        if not dry_run and scenario_history:
+            asking_module.record_runs(scenario_history, runs)
+        if not dry_run and asking_memory:
+            attempted = sum(r.attempted for r in outcome.scored.values())
+            correct = sum(r.correct for r in outcome.scored.values())
+            written = asking_module.append_log_rows(
+                asking_memory, date=date, runs=runs,
+                drill_score=f"{correct}/{attempted}" if attempted else "—",
+                biggest_problem=focus)
+            outcome.notes.append(
+                f"Log tables in {asking_memory.name} updated — the prose above them is still "
+                f"yours to write (Q16)." if written else
+                f"{asking_memory} has no scenario log to append to, so its tables are "
+                f"unchanged. The history in {scenario_history} is written either way.")
+
     return outcome
 
 
@@ -418,6 +461,13 @@ def format_outcome(outcome: SessionOutcome, *, dry_run: bool = False) -> str:
         lines.append("  " + ", ".join(
             f"{phrase}: {r.slips} slip(s), {r.uses} replacement(s)"
             for phrase, r in sorted(session.vocabulary.items())))
+
+    if outcome.scenarios:
+        lines.append("")
+        lines.append("Scenarios:")
+        lines += [f"  {run.scenario:<28} {run.score:>5}  "
+                  f"{('failed: ' + ', '.join(run.failed)) if run.failed else 'clean'}"
+                  for run in outcome.scenarios]
 
     if outcome.changes:
         lines.append("")
@@ -660,6 +710,22 @@ def main(argv: list[str] | None = None) -> int:
                        help="Prompts in the opening block")
     start.add_argument("--patterns", type=int, default=None,
                        help="How many patterns the block spans")
+    start.add_argument("--mode", choices=MODES, default=ANSWER_MODE,
+                       help='Which practice mode is opening. "answer" builds the grammar '
+                            'brief from memory.md (P14); "ask" builds Question Practice '
+                            "Mode's brief instead — the budget, the warm-up block from "
+                            "asking/drills, and this session's scenarios already selected "
+                            "(Q2, Q12). They read different files and pick different things, "
+                            "so the mode has to be declared rather than inferred.")
+    start.add_argument("--scenarios-dir", type=Path, default=analysis.parent / "asking" /
+                       "scenarios", help="Ask mode: where the scenario packs live")
+    start.add_argument("--scenario-history", type=Path,
+                       default=analysis / "asking_scenarios.csv",
+                       help="Ask mode: which scenarios have run, and how they scored")
+    start.add_argument("--asking-memory", type=Path, default=analysis / "asking_memory.md",
+                       help="Ask mode: the question-practice tracker (Q16)")
+    start.add_argument("--scenarios", type=int, default=None,
+                       help="Ask mode: how many scenarios to draw (Q12: four to six)")
     start.add_argument("--no-drill", action="store_true",
                        help="Brief only — don't draw a block or touch the pending file")
 
@@ -683,6 +749,20 @@ def main(argv: list[str] | None = None) -> int:
     end.add_argument("--drill-history", type=Path, default=analysis / "drills.csv")
     end.add_argument("--drill-items", type=Path, default=analysis / "drill_items.csv")
     end.add_argument("--pending", type=Path, default=analysis / "drill_pending.json")
+    end.add_argument("--scenario", action="append", default=[],
+                     metavar="NAME:MET/TOTAL:FAILED",
+                     help="Ask mode (Q10): one scenario's result, e.g. "
+                          "'standup-migration:2/4:register,followup'. Repeatable. Writes the "
+                          "scenario history and adds the rows to asking_memory.md's two "
+                          "tables, so the log stops being retyped by hand at the end of a "
+                          "session. /TOTAL may be left off for a scenario in the pool.")
+    end.add_argument("--scenarios-dir", type=Path,
+                     default=analysis.parent / "asking" / "scenarios",
+                     help="Ask mode: where the scenario packs live")
+    end.add_argument("--scenario-history", type=Path, default=analysis / "asking_scenarios.csv",
+                     help="Ask mode: the scenario history to append to")
+    end.add_argument("--asking-memory", type=Path, default=analysis / "asking_memory.md",
+                     help="Ask mode: the tracker whose log tables get this session's rows")
     end.add_argument("--dry-run", action="store_true",
                      help="Print what would be written without writing it")
     end.add_argument("errors", nargs="*", metavar="CATEGORY:COUNT",
@@ -709,6 +789,35 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "start":
         from voxlib import brief as brief_module
+
+        if args.mode == ASK_MODE:
+            # Ask mode's defaults live in this branch rather than in the flags:
+            # a default of `drills/` on --drills-dir is right for the answering
+            # brief and wrong here, and a mode that silently drew a grammar
+            # prompt into a question block is the collision `asking/` exists to
+            # prevent. Explicit flags still win.
+            from voxlib import asking as asking_module
+
+            defaults = _default_path().parent
+            print(asking_module.render(
+                today=args.date,
+                scenarios_dir=args.scenarios_dir,
+                drills_dir=(args.drills_dir if args.drills_dir != defaults.parent / "drills"
+                            else defaults.parent / "asking" / "drills"),
+                memory_path=args.asking_memory,
+                history_path=args.scenario_history,
+                practice_path=args.path,
+                mistakes_path=args.mistakes,
+                item_history=(args.item_history if args.item_history != defaults /
+                              "drill_items.csv" else defaults / "asking_drill_items.csv"),
+                pending=(args.pending if args.pending != defaults / "drill_pending.json"
+                         else defaults / "asking_pending.json"),
+                count=args.scenarios or asking_module.DEFAULT_SCENARIOS,
+                with_block=not args.no_drill,
+                block_size=args.count or brief_module.DEFAULT_BLOCK,
+                patterns=args.patterns or brief_module.DEFAULT_PATTERNS,
+            ))
+            return 0
 
         print(brief_module.render(
             today=args.date,
@@ -737,6 +846,23 @@ def main(argv: list[str] | None = None) -> int:
             errors[category] = int(count)
 
     if args.command == "end":
+        if args.mode == ASK_MODE:
+            # The same switch `start --mode ask` makes, and for the same reason:
+            # every drill default here points at the grammar pool, and a question
+            # block scored into `drills.csv` would land in the trend the
+            # recording workflow reads at step 4b. Q14 used to pass four flags to
+            # avoid that, which is four chances to forget one.
+            defaults = _default_path().parent
+            for attribute, default, replacement in (
+                    ("drills_dir", defaults.parent / "drills", defaults.parent / "asking" / "drills"),
+                    ("drill_history", defaults / "drills.csv", defaults / "asking_drills.csv"),
+                    ("drill_items", defaults / "drill_items.csv",
+                     defaults / "asking_drill_items.csv"),
+                    ("pending", defaults / "drill_pending.json",
+                     defaults / "asking_pending.json")):
+                if getattr(args, attribute) == default:
+                    setattr(args, attribute, replacement)
+
         words: dict[str, WordResult] = {}
         for raw in args.word:
             head, _, used = raw.rpartition(_COUNT_SEPARATOR)
@@ -755,6 +881,8 @@ def main(argv: list[str] | None = None) -> int:
                 mode=args.mode, history_path=args.path, focus_log_path=args.focus_log,
                 pending=args.pending, drills_dir=args.drills_dir,
                 drill_history=args.drill_history, drill_item_history=args.drill_items,
+                scenarios=args.scenario, scenarios_dir=args.scenarios_dir,
+                scenario_history=args.scenario_history, asking_memory=args.asking_memory,
                 dry_run=args.dry_run)
         except ValueError as error:
             parser.error(str(error))

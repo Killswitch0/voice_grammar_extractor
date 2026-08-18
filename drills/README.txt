@@ -37,7 +37,8 @@ Two rules worth following, both learned the hard way:
     items). A pool barely larger than a session stops testing the pattern and
     starts testing the list.
 
-Ask Claude to write one: the session-report workflow (CLAUDE.md step 5) creates
+Ask Claude to write one: the session-report workflow (step 5 of the
+analyze-recording skill) creates
 a drill whenever the current primary target has none.
 
 An invented, impersonal example lives in tests/fixtures/drills/ if you want to
