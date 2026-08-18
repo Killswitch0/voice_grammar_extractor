@@ -71,6 +71,7 @@ HISTORY_COLUMNS = [
     # to an append-only file can only go on the end, or the rows already in it
     # would have to be rewritten to stay aligned. See `voxlib.csvfile`.
     "vocabulary",
+    "mode",
 ]
 
 # Errors and words are separated by a colon in the breakdown, sessions by a
@@ -93,6 +94,23 @@ CLEAN_SESSIONS_TO_RETIRE = 3
 # quiet weekend reads as a collapse.
 BUDGET_DAYS = 14
 
+# The two kinds of practice session. They are not the same denominator, which is
+# the whole reason this is a column: an answering session is a few long turns and
+# runs to hundreds of words, while an asking session is a dozen questions and may
+# run to eighty. Pooling them deflates every per-1,000-word rate in the file by
+# however much asking happened that fortnight — a number nobody chose and nobody
+# could see.
+ANSWER_MODE = "answer"
+ASK_MODE = "ask"
+MODES = (ANSWER_MODE, ASK_MODE)
+
+# Question Practice Mode ran twice before this column existed and tagged its rows
+# with a notes prefix, because `notes` was the only field available at the time
+# (CLAUDE.md Q14). Reading that prefix back is what keeps those two rows from
+# counting as answering sessions forever. New rows declare the mode properly;
+# this is a fallback for the ones written before they could.
+_ASK_NOTES_PREFIX = "question practice"
+
 # How many recent practice sessions the attended-vs-unmonitored comparison pools.
 # Three, matching the recency window the mistake history uses: one session is too
 # few words to divide by, and the whole history would average away the present.
@@ -109,6 +127,7 @@ class PracticeSession:
     long_turns: int = 0
     vocabulary: dict[str, "WordResult"] = field(default_factory=dict)
     notes: str = ""
+    mode: str = ANSWER_MODE
 
     @property
     def errors(self) -> int:
@@ -185,6 +204,17 @@ def _parse_breakdown(raw: str) -> dict[str, int]:
     return errors
 
 
+def _read_mode(raw: dict) -> str:
+    """The declared mode, or the one the notes prefix implies for a row written
+    before the column existed."""
+    declared = (raw.get("mode") or "").strip().lower()
+    if declared in MODES:
+        return declared
+    if (raw.get("notes") or "").strip().lower().startswith(_ASK_NOTES_PREFIX):
+        return ASK_MODE
+    return ANSWER_MODE
+
+
 def load(path: Path) -> list[PracticeSession]:
     if not path.exists():
         return []
@@ -200,6 +230,7 @@ def load(path: Path) -> list[PracticeSession]:
                 long_turns=int(raw.get("long_turns") or 0),
                 vocabulary=_parse_vocabulary(raw.get("vocabulary") or ""),
                 notes=(raw.get("notes") or "").strip(),
+                mode=_read_mode(raw),
             ))
     sessions.sort(key=lambda s: s.date)
     return sessions
@@ -208,7 +239,7 @@ def load(path: Path) -> list[PracticeSession]:
 def record_session(path: Path, *, date: str, focus: str, learner_words: int,
                    errors_by_category: dict[str, int], reproductions: int = 0,
                    long_turns: int = 0, vocabulary: Optional[dict[str, WordResult]] = None,
-                   notes: str = "") -> None:
+                   notes: str = "", mode: str = ANSWER_MODE) -> None:
     """
     Appends one practice session.
 
@@ -228,6 +259,8 @@ def record_session(path: Path, *, date: str, focus: str, learner_words: int,
     negative = sorted(c for c, n in errors_by_category.items() if n < 0)
     if negative:
         raise ValueError(f"Negative error counts for: {negative}")
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}.")
 
     csvfile.append(path, HISTORY_COLUMNS, [{
         "date": date,
@@ -239,6 +272,7 @@ def record_session(path: Path, *, date: str, focus: str, learner_words: int,
         "long_turns": long_turns,
         "vocabulary": _format_vocabulary(vocabulary or {}),
         "notes": notes,
+        "mode": mode,
     }])
 
     logger.info("Recorded a practice session for %s: %d words, %d errors", date,
@@ -271,7 +305,7 @@ class SessionOutcome:
 def close_session(*, date: str, focus: str, learner_words: int,
                   errors_by_category: dict[str, int], reproductions: int = 0,
                   long_turns: int = 0, vocabulary: Optional[dict[str, WordResult]] = None,
-                  notes: str = "", history_path: Path,
+                  notes: str = "", mode: str = ANSWER_MODE, history_path: Path,
                   focus_log_path: Path, pending: Path, drills_dir: Path,
                   drill_history: Path, drill_item_history: Path,
                   dry_run: bool = False) -> SessionOutcome:
@@ -293,10 +327,13 @@ def close_session(*, date: str, focus: str, learner_words: int,
             f"and with every other practice session."
         )
 
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}.")
+
     outcome = SessionOutcome(session=PracticeSession(
         date=date, focus=focus, learner_words=learner_words,
         errors_by_category=dict(errors_by_category), reproductions=reproductions,
-        long_turns=long_turns, vocabulary=dict(vocabulary or {}), notes=notes))
+        long_turns=long_turns, vocabulary=dict(vocabulary or {}), notes=notes, mode=mode))
 
     # 1. The block. `missed` is per category, because that is what the schedule
     #    is keyed on — a drill is an implementation of a category, not a peer.
@@ -351,7 +388,7 @@ def close_session(*, date: str, focus: str, learner_words: int,
     if not dry_run:
         record_session(history_path, date=date, focus=focus, learner_words=learner_words,
                        errors_by_category=errors_by_category, reproductions=reproductions,
-                       long_turns=long_turns, vocabulary=vocabulary, notes=notes)
+                       long_turns=long_turns, vocabulary=vocabulary, notes=notes, mode=mode)
 
     return outcome
 
@@ -360,7 +397,7 @@ def format_outcome(outcome: SessionOutcome, *, dry_run: bool = False) -> str:
     from voxlib import drill as drill_module
 
     session = outcome.session
-    lines = [f"{'Would close' if dry_run else 'Closed'} {session.date}"
+    lines = [f"{'Would close' if dry_run else 'Closed'} {session.date} ({session.mode})"
              f"{f' — focus: {session.focus}' if session.focus else ''}", ""]
 
     for name, result in outcome.scored.items():
@@ -455,16 +492,24 @@ def vocabulary_trends(sessions: list[PracticeSession]) -> list[WordTrend]:
 
 
 def practice_rates(sessions: list[PracticeSession],
-                   window: int = COMPARISON_SESSIONS) -> dict[str, float]:
+                   window: int = COMPARISON_SESSIONS,
+                   mode: Optional[str] = ANSWER_MODE) -> dict[str, float]:
     """
     Per-category error rate per 1,000 learner words, over the last `window`
-    sessions.
+    sessions of one mode.
 
     Pooled rather than averaged per session: a 90-word session and a 400-word one
     are not two equal observations, and averaging their rates would let the short
     one swing the result. One numerator over one denominator.
+
+    One mode, though, and by default the answering one. The comparison this feeds
+    is typed grammar production against the same categories in speech, and an
+    asking session contributes words to the denominator while contributing
+    nothing those categories could appear in — so pooling the two understates
+    every typed rate. Pass `mode=None` to pool anyway.
     """
-    recent = sessions[-window:] if window else sessions
+    pool = [s for s in sessions if mode is None or s.mode == mode]
+    recent = pool[-window:] if window else pool
     words = sum(s.learner_words for s in recent)
     if not words:
         return {}
@@ -486,23 +531,23 @@ def format_table(sessions: list[PracticeSession], *,
         return ("No practice sessions recorded yet. Say \"let's practice\" to run one.\n\n"
                 + budget_line([], recording_dates or [], today))
 
-    header = (f"{'Date':<12} {'Focus':<34} {'Words':>7} {'Errors':>7} {'Per 1k':>7} "
-              f"{'Repro':>6} {'Long':>5}")
+    header = (f"{'Date':<12} {'Mode':<7} {'Focus':<32} {'Words':>7} {'Errors':>7} "
+              f"{'Per 1k':>7} {'Repro':>6} {'Long':>5}")
     lines = [header, "-" * len(header)]
     for s in sessions:
         rate = "—" if s.rate_per_1000 is None else f"{s.rate_per_1000:.2f}"
-        lines.append(f"{s.date:<12} {s.focus[:34]:<34} {s.learner_words:>7} {s.errors:>7} "
-                     f"{rate:>7} {s.reproductions:>6} {s.long_turns:>5}")
+        lines.append(f"{s.date:<12} {s.mode:<7} {s.focus[:32]:<32} {s.learner_words:>7} "
+                     f"{s.errors:>7} {rate:>7} {s.reproductions:>6} {s.long_turns:>5}")
 
     if speech_rates:
-        practice = practice_rates(sessions)
+        practice = practice_rates(sessions, mode=ANSWER_MODE)
         shared = sorted(set(practice) & set(speech_rates),
                         key=lambda c: -speech_rates[c])
         if shared:
             lines.append("")
             lines.append(f"Attended vs unmonitored, errors per 1,000 words "
-                         f"(last {COMPARISON_SESSIONS} practice sessions against the latest "
-                         f"recording):")
+                         f"(last {COMPARISON_SESSIONS} answering sessions against the latest "
+                         f"recording — asking sessions are a different denominator):")
             lines.append(f"  {'Category':<42} {'Typed':>7} {'Spoken':>7}")
             for category in shared:
                 lines.append(f"  {category[:42]:<42} {practice[category]:>7.2f} "
@@ -632,6 +677,7 @@ def main(argv: list[str] | None = None) -> int:
                           'how many times a replacement was produced. e.g. "you know:2:0". '
                           "Repeatable.")
     end.add_argument("--notes", default="")
+    end.add_argument("--mode", choices=MODES, default=ANSWER_MODE, help='Which practice mode ran: "answer" for Conversation Practice Mode (Claude asks, you answer) or "ask" for Question Practice Mode (Claude gives a situation, you ask). They are different denominators and are never pooled into one rate.')
     end.add_argument("--focus-log", type=Path, default=analysis / "conversation_focus_log.md")
     end.add_argument("--drills-dir", type=Path, default=analysis.parent / "drills")
     end.add_argument("--drill-history", type=Path, default=analysis / "drills.csv")
@@ -654,6 +700,7 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--long-turns", type=int, default=0,
                      help="P23 long turns they gave")
     add.add_argument("--notes", default="")
+    add.add_argument("--mode", choices=MODES, default=ANSWER_MODE, help='Which practice mode ran: "answer" for Conversation Practice Mode (Claude asks, you answer) or "ask" for Question Practice Mode (Claude gives a situation, you ask). They are different denominators and are never pooled into one rate.')
     add.add_argument("errors", nargs="*", metavar="CATEGORY:COUNT",
                     help='One per category that produced an error, e.g. "Article Errors:3". '
                          "Nothing at all means a clean session.")
@@ -705,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
                 date=args.date, focus=args.focus, learner_words=args.words,
                 errors_by_category=errors, reproductions=args.reproductions,
                 long_turns=args.long_turns, vocabulary=words, notes=args.notes,
-                history_path=args.path, focus_log_path=args.focus_log,
+                mode=args.mode, history_path=args.path, focus_log_path=args.focus_log,
                 pending=args.pending, drills_dir=args.drills_dir,
                 drill_history=args.drill_history, drill_item_history=args.drill_items,
                 dry_run=args.dry_run)
@@ -719,7 +766,7 @@ def main(argv: list[str] | None = None) -> int:
             record_session(args.path, date=args.date, focus=args.focus,
                            learner_words=args.words, errors_by_category=errors,
                            reproductions=args.reproductions, long_turns=args.long_turns,
-                           notes=args.notes)
+                           notes=args.notes, mode=args.mode)
         except ValueError as error:
             parser.error(str(error))
         print(f"Recorded {args.date} in {args.path}: {args.words} words, "

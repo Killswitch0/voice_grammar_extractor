@@ -175,5 +175,71 @@ def test_the_personal_data_files_are_all_gitignored():
 
     for name in ("memory.md", "mistakes.csv", "scores_history.csv", "fluency_history.csv",
                  "drills.csv", "drill_items.csv", "practice_history.csv",
-                 "conversation_focus_log.md"):
+                 "conversation_focus_log.md", "asking_memory.md", "asking_drills.csv",
+                 "asking_drill_items.csv", "asking_pending.json"):
         assert f"analysis/{name}" in ignored, f"analysis/{name} would be committed"
+
+
+def test_the_content_directories_built_from_the_owners_mistakes_are_gitignored():
+    """
+    `drills/` and `asking/` are not code with the user's data beside it — the
+    content *is* the data. A drill's prompts are reconstructions of sentences the
+    owner said; a scenario's `trap` is a reconstruction of an error they make, and
+    its situations are the ones that actually happened to them. Both directories
+    were nearly committed on the grounds that the content "looked generic", which
+    is a judgement that does not survive the next file added to them.
+
+    Only each README is committed, because it documents the format.
+    """
+    ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+
+    for directory in ("drills", "asking"):
+        assert f"{directory}/*" in ignored, f"{directory}/ would be committed"
+        assert f"!{directory}/README.txt" in ignored, (
+            f"{directory}/README.txt is ignored too, so the format is documented nowhere"
+        )
+
+
+def _question_rules() -> list[int]:
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+    section = text[text.index("# Interactive Question Practice Mode"):]
+    return [int(n) for n in re.findall(r"^Q(\d+)\. ", section, flags=re.M)]
+
+
+def test_question_rules_are_numbered_contiguously():
+    """Same guard as the general rules: inserting a Q rule mid-list is exactly
+    where the numbering breaks, and every cross-reference in that section is by
+    number."""
+    numbers = _question_rules()
+
+    assert numbers, "no Q rules found — did the section heading change?"
+    assert numbers == list(range(1, len(numbers) + 1)), f"Q numbering is not 1..N: {numbers}"
+
+
+def test_the_practice_preamble_states_the_right_question_rule_range():
+    """The P-rule preamble tells the reader which other rule sets exist so a bare
+    number is never ambiguous. It was already stale once for the general rules."""
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+    highest = max(_question_rules())
+
+    match = re.search(r"`Q1`–`Q(\d+)` below", text)
+    assert match, "the P-rules preamble no longer states a question-rules range"
+    assert int(match.group(1)) == highest, (
+        f"the preamble says the question rules run to {match.group(1)}, but there are {highest}"
+    )
+
+
+def test_question_practice_mode_is_told_to_record_the_session_it_just_ran():
+    """Same reasoning as the drill and practice histories: a mode that measures
+    something and writes it nowhere leaves no trend, and this one is the only
+    measurement of questions the owner produced."""
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+
+    for name in ("asking/drills", "asking/scenarios", "asking_memory.md",
+                 "asking_drills.csv", "asking_pending.json"):
+        assert name in text, f"CLAUDE.md never mentions {name}, which the mode needs"
+
+    # Without this flag the row lands in the answering-mode denominator, where a
+    # dozen short questions understate every typed rate. The column can only be
+    # right if the command that writes it says so.
+    assert "--mode ask" in text, "Q14 never passes --mode ask, so asking rows would pool"

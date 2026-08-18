@@ -1,0 +1,66 @@
+# A test fixture, not a real scenario pack.
+#
+# Real packs are written from situations that actually happened to the learner and
+# went badly, and their `trap` lines are reconstructions of that learner's own
+# errors — which is what makes `asking/` personal data and gitignored. This file
+# is invented and belongs to nobody. It exists so the format has a committed
+# example and the checks in tests/test_asking.py have something to run against on
+# a fresh clone.
+#
+# The `form` criterion below is the canonical wording, identical in every real
+# scenario too. It is one string on purpose: written per scenario it becomes a
+# prediction of the error you expect, and then it scores nothing when a different
+# one arrives.
+pack: invented
+setting: life
+about: |
+  Two invented situations, one asking a stranger and one asking a friend, so the
+  register check has something to vary across.
+
+scenarios:
+  - name: fixture-library-card
+    function: due-diligence
+    register: stranger
+    situation: |
+      You are at the desk of a library you have never used. You want to borrow
+      books but have no idea what the rules are, and the person at the desk is
+      about to turn to the next person in the queue.
+    ask_for: two questions
+    reply: |
+      Three weeks, and you can renew twice online.
+    holds_back: |
+      What happens if you are late, and whether renewing needs an account.
+    criteria:
+      - id: form
+        check: everything they produced is well formed — auxiliary present, word order right, and the opening frame governing what follows it (mind + -ing, possible + to, an embedded clause in statement order). Score what actually came out wrong, not a pattern named in advance
+      - id: function
+        check: the two questions cover borrowing limits and cost, not two versions of one topic
+      - id: register
+        check: businesslike — this is a service desk, and the questions are not apologetic
+      - id: followup
+        check: asks what a late return costs rather than accepting the renewal answer as complete
+    trap: |
+      Asking only how many books, which is usually written on a sign.
+
+  - name: fixture-borrow-a-bike
+    function: ask-for-help
+    register: social
+    situation: |
+      A friend mentioned they have a spare bike in their garage. You would like
+      to borrow it for a weekend but have never asked them for anything before.
+    ask_for: one question
+    reply: |
+      Sure, should be fine. It's been in there a while though.
+    holds_back: |
+      Whether "a while" means it needs work before it can be ridden.
+    criteria:
+      - id: form
+        check: everything they produced is well formed — auxiliary present, word order right, and the opening frame governing what follows it (mind + -ing, possible + to, an embedded clause in statement order). Score what actually came out wrong, not a pattern named in advance
+      - id: function
+        check: names the weekend and the purpose, so the answer is actionable rather than "maybe"
+      - id: register
+        check: asks as a friend rather than negotiating — no over-hedging for a small favour
+      - id: followup
+        check: picks up "a while" and asks whether it is rideable as it stands
+    trap: |
+      A question so tentative it invites "let me think about it".

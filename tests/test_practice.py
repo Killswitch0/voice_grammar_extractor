@@ -23,10 +23,11 @@ COLON_CATEGORY = 'Word Order: "just" With Modal "can"'
 
 
 def _session(date="2026-08-17", focus="Article Errors", words=400,
-             errors=None, reproductions=0, long_turns=0) -> PracticeSession:
+             errors=None, reproductions=0, long_turns=0,
+             mode=practice.ANSWER_MODE) -> PracticeSession:
     return PracticeSession(date=date, focus=focus, learner_words=words,
                            errors_by_category=errors if errors is not None else {},
-                           reproductions=reproductions, long_turns=long_turns)
+                           reproductions=reproductions, long_turns=long_turns, mode=mode)
 
 
 # --- the denominator ---------------------------------------------------------
@@ -570,3 +571,121 @@ def test_the_counts_are_reported_when_a_session_closes(tmp_path):
 
     assert "super: 2 slip(s), 1 replacement(s)" in practice_module.format_outcome(outcome)
     assert practice_module.load(tmp_path / "practice.csv")[0].vocabulary["super"].slips == 2
+
+
+# --- the two modes -----------------------------------------------------------
+#
+# Question Practice Mode produces a dozen short questions; Conversation Practice
+# Mode produces a few long turns. Both are attended production and both belong in
+# this file, but they are not one denominator, and for two sessions they were
+# distinguishable only by a prefix somebody remembered to type into `notes`.
+
+def test_a_session_is_an_answering_session_unless_it_says_otherwise(tmp_path: Path):
+    path = tmp_path / "practice.csv"
+    practice.record_session(path, date="2026-08-18", focus="Article Errors",
+                            learner_words=300, errors_by_category={})
+
+    assert practice.load(path)[0].mode == practice.ANSWER_MODE
+
+
+def test_the_mode_survives_the_round_trip(tmp_path: Path):
+    path = tmp_path / "practice.csv"
+    practice.record_session(path, date="2026-08-18", focus="Embedded Question Word Order",
+                            learner_words=82, errors_by_category={}, mode=practice.ASK_MODE)
+
+    assert practice.load(path)[0].mode == practice.ASK_MODE
+
+
+def test_an_unknown_mode_is_refused(tmp_path: Path):
+    with pytest.raises(ValueError, match="mode must be one of"):
+        practice.record_session(tmp_path / "practice.csv", date="2026-08-18", focus="",
+                                learner_words=10, errors_by_category={}, mode="questions")
+
+
+def test_a_row_written_before_the_column_existed_is_read_from_its_notes(tmp_path: Path):
+    """
+    Two asking sessions were recorded before there was a column to declare it in,
+    tagged with the notes prefix Q14 required for exactly this reason. Defaulting
+    them to "answer" would pool eighty-word question sessions into the
+    answering-mode denominator forever.
+    """
+    path = tmp_path / "practice.csv"
+    path.write_text(
+        "date,focus,learner_words,errors,error_breakdown,reproductions,long_turns,notes,"
+        "vocabulary\n"
+        "2026-08-18,Embedded Question Word Order,82,0,,2,0,"
+        '"question practice: warm-up block only",\n'
+        "2026-08-17,Article Errors,410,0,,3,2,\"three long turns on work\",\n",
+        encoding="utf-8")
+
+    by_date = {s.date: s.mode for s in practice.load(path)}
+
+    assert by_date["2026-08-18"] == practice.ASK_MODE
+    assert by_date["2026-08-17"] == practice.ANSWER_MODE
+
+
+def test_appending_widens_an_older_file_without_shifting_its_rows(tmp_path: Path):
+    path = tmp_path / "practice.csv"
+    path.write_text(
+        "date,focus,learner_words,errors,error_breakdown,reproductions,long_turns,notes,"
+        "vocabulary\n"
+        "2026-08-17,Article Errors,410,1,Article Errors:1,3,2,,\n",
+        encoding="utf-8")
+
+    practice.record_session(path, date="2026-08-18", focus="", learner_words=90,
+                            errors_by_category={}, mode=practice.ASK_MODE)
+
+    old, new = practice.load(path)
+    assert (old.learner_words, old.errors_by_category, old.reproductions) == (410, {"Article Errors": 1}, 3)
+    assert old.mode == practice.ANSWER_MODE
+    assert (new.learner_words, new.mode) == (90, practice.ASK_MODE)
+
+
+def test_asking_words_do_not_dilute_the_answering_rate():
+    """
+    The reason the column exists. An asking session contributes words to the
+    denominator while contributing nothing the grammar categories could appear
+    in, so pooling the two understates every typed rate — and that rate is what
+    the attended-vs-unmonitored comparison is built on.
+    """
+    sessions = [
+        _session(date="2026-08-17", words=500, errors={"Article Errors": 5}),
+        _session(date="2026-08-18", words=500, errors={}, mode=practice.ASK_MODE),
+    ]
+
+    assert practice.practice_rates(sessions)["Article Errors"] == 10.0
+    assert practice.practice_rates(sessions, mode=None)["Article Errors"] == 5.0
+
+
+def test_the_comparison_ignores_asking_sessions():
+    sessions = [
+        _session(date="2026-08-17", words=500, errors={"Article Errors": 5}),
+        _session(date="2026-08-18", words=500, errors={}, mode=practice.ASK_MODE),
+    ]
+
+    table = practice.format_table(sessions, speech_rates={"Article Errors": 3.15},
+                                  today="2026-08-18")
+
+    assert "10.00" in table, table
+    assert "answering sessions" in table
+
+
+def test_the_budget_counts_asking_sessions_as_treatment():
+    """Both modes correct errors and both end in re-productions, which is what
+    rule 19 calls the treatment — the budget line counts them together."""
+    sessions = [_session(date="2026-08-18", reproductions=2, mode=practice.ASK_MODE)]
+
+    line = practice.budget_line(sessions, ["2026-08-18"], "2026-08-18")
+
+    assert "1 practice session(s)" in line
+    assert "2 corrected repetition(s)" in line
+
+
+def test_the_cli_records_the_mode_it_was_given(tmp_path: Path, capsys):
+    path = tmp_path / "practice.csv"
+
+    practice.main(["--path", str(path), "add", "--date", "2026-08-18", "--words", "82",
+                   "--mode", "ask", "--focus", "Embedded Question Word Order"])
+    capsys.readouterr()
+
+    assert practice.load(path)[0].mode == practice.ASK_MODE
