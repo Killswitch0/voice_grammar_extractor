@@ -738,6 +738,43 @@ def test_a_seventh_answer_to_a_six_prompt_block_is_refused(tmp_path: Path):
         drill.main(paths + ["answer", "three"])
 
 
+def test_a_whole_block_can_be_recorded_in_one_call(tmp_path: Path):
+    """The block does not have to cost six exchanges. It is written, with time to
+    think, and scored against a key either way — so handing over all the prompts
+    and taking the answers back together measures the same thing for a fraction
+    of the session."""
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+
+    drill.main(paths + ["answer", "She's a teacher.", "He works here."])
+    block = drill.read_block(tmp_path / "pending.json")
+
+    assert block.answers == ["She's a teacher.", "He works here."]
+    assert block.complete
+
+
+def test_a_batch_longer_than_the_block_is_refused(tmp_path: Path):
+    """Answers are paired with prompts by position, so recording an extra one
+    would score an answer against a prompt nobody was asked."""
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "2"])
+
+    with pytest.raises(SystemExit):
+        drill.main(paths + ["answer", "one", "two", "three"])
+
+    assert drill.read_block(tmp_path / "pending.json").answers == []
+
+
+def test_a_batch_lands_after_the_answers_already_recorded(tmp_path: Path):
+    paths = _cli_paths(tmp_path)
+    drill.main(paths + ["next", "--mixed", "--count", "3"])
+    drill.main(paths + ["answer", "one"])
+
+    drill.main(paths + ["answer", "two", "three"])
+
+    assert drill.read_block(tmp_path / "pending.json").answers == ["one", "two", "three"]
+
+
 def test_recording_an_answer_with_no_block_says_so(tmp_path: Path):
     with pytest.raises(SystemExit):
         drill.main(_cli_paths(tmp_path) + ["answer", "anything"])

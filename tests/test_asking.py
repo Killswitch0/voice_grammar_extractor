@@ -191,3 +191,186 @@ def test_a_real_pack_covers_more_than_one_register():
     registers = {s["register"] for _, s in real}
 
     assert len(registers) >= 4, f"only these registers are covered: {sorted(registers)}"
+
+
+# --- the module that runs the session ----------------------------------------
+#
+# Everything above checks the *content*. What follows checks `voxlib.asking`,
+# which reads that content and does the selecting and recording Q2, Q12 and Q16
+# used to ask for by hand.
+
+from voxlib import asking  # noqa: E402
+
+
+def _scenario(name: str, register: str, criteria: int = 4) -> asking.Scenario:
+    return asking.Scenario(
+        name=name, pack="p", setting="work", register=register, function="f",
+        situation="s", ask_for="one question", reply="r", holds_back="h",
+        criteria=[asking.Criterion(f"c{i}", "check") for i in range(criteria)],
+        trap="t")
+
+
+def test_a_pack_loads_with_everything_a_session_reads():
+    scenarios = asking.load_pack(FIXTURES / "scenarios" / "invented.yaml")
+
+    assert scenarios, "the fixture pack loaded as empty"
+    first = scenarios[0]
+    assert first.pack == "invented" and first.register
+    assert first.situation and first.reply and first.holds_back and first.trap
+    assert {c.id for c in first.criteria} >= {"form", "function", "register", "followup"}
+
+
+def test_never_run_scenarios_come_first():
+    pool = [_scenario("old", "peer"), _scenario("new", "manager")]
+    history = [asking.ScenarioRun(date="2026-01-01", scenario="old", criteria_met=4,
+                                  criteria_total=4)]
+
+    chosen = asking.choose_scenarios(pool, history, count=2)
+
+    assert [c.scenario.name for c in chosen] == ["new", "old"]
+
+
+def test_a_scenario_that_failed_outranks_one_that_was_clean():
+    pool = [_scenario("clean", "peer"), _scenario("failed", "manager")]
+    history = [
+        asking.ScenarioRun(date="2026-01-01", scenario="clean", criteria_met=4,
+                           criteria_total=4),
+        asking.ScenarioRun(date="2026-01-01", scenario="failed", criteria_met=2,
+                           criteria_total=4, failed=["register"]),
+    ]
+
+    chosen = asking.choose_scenarios(pool, history, count=1)
+
+    assert chosen[0].scenario.name == "failed"
+    assert "register" in chosen[0].reason
+
+
+def test_registers_are_varied_before_a_second_one_is_taken():
+    """Q12: five peer-level scenarios train less than one peer, one manager and
+    one stranger — so the pass takes a register before it takes a repeat."""
+    pool = [_scenario("peer-a", "peer"), _scenario("peer-b", "peer"),
+            _scenario("boss", "manager")]
+
+    chosen = asking.choose_scenarios(pool, [], count=2)
+
+    assert {c.scenario.register for c in chosen} == {"peer", "manager"}
+
+
+def test_a_small_pool_still_fills_the_session():
+    """Variety is a preference, not a reason to run three scenarios when five
+    were asked for."""
+    pool = [_scenario("a", "peer"), _scenario("b", "peer"), _scenario("c", "peer")]
+
+    chosen = asking.choose_scenarios(pool, [], count=3)
+
+    assert len(chosen) == 3
+
+
+def test_last_sessions_clean_scenario_is_ranked_last():
+    pool = [_scenario("yesterday", "peer"), _scenario("older", "peer")]
+    history = [
+        asking.ScenarioRun(date="2026-01-01", scenario="older", criteria_met=4,
+                           criteria_total=4),
+        asking.ScenarioRun(date="2026-02-01", scenario="yesterday", criteria_met=4,
+                           criteria_total=4),
+    ]
+
+    chosen = asking.choose_scenarios(pool, history, count=2)
+
+    assert [c.scenario.name for c in chosen] == ["older", "yesterday"]
+
+
+def test_a_result_takes_its_denominator_from_the_scenario():
+    pool = {"lib": _scenario("lib", "stranger", criteria=4)}
+
+    run = asking.parse_run("lib:3:register,followup", pool, "2026-03-01")
+
+    assert (run.criteria_met, run.criteria_total) == (3, 4)
+    assert run.failed == ["register", "followup"]
+    assert run.register == "stranger"
+
+
+def test_a_result_for_an_unknown_scenario_needs_its_own_total():
+    with pytest.raises(ValueError, match="no criteria count"):
+        asking.parse_run("gone:3", {}, "2026-03-01")
+
+    run = asking.parse_run("gone:3/4", {}, "2026-03-01")
+    assert run.criteria_total == 4
+
+
+def test_more_criteria_met_than_exist_is_refused():
+    with pytest.raises(ValueError, match="not possible"):
+        asking.parse_run("lib:5/4", {}, "2026-03-01")
+
+
+def test_runs_survive_a_write_and_a_read(tmp_path):
+    path = tmp_path / "asking_scenarios.csv"
+    runs = [asking.ScenarioRun(date="2026-03-01", scenario="lib", pack="p",
+                               register="stranger", function="f", criteria_met=3,
+                               criteria_total=4, failed=["register", "followup"])]
+
+    asking.record_runs(path, runs)
+    back = asking.load_history(path)
+
+    assert len(back) == 1
+    assert back[0].failed == ["register", "followup"]
+    assert back[0].score == "3/4"
+
+
+def test_the_log_tables_get_this_sessions_rows(tmp_path):
+    """Q16's two tables are generated from the same results the CSV row is built
+    from, so they cannot disagree with it."""
+    path = tmp_path / "asking_memory.md"
+    path.write_text(
+        "# Question Practice Memory\n\n## Scenario log\n\n"
+        "| Date | Scenario | Criteria met | Failed |\n|---|---|---|---|\n"
+        "| 2026-01-01 | old | 4/4 | — |\n\n"
+        "## Session history\n\n"
+        "| Date | Scenarios | Criteria met | Drill score | Biggest problem |\n"
+        "|---|---|---|---|---|\n", encoding="utf-8")
+
+    written = asking.append_log_rows(
+        path, date="2026-03-01",
+        runs=[asking.ScenarioRun(date="2026-03-01", scenario="lib", criteria_met=3,
+                                 criteria_total=4, failed=["register"])],
+        drill_score="4/6", biggest_problem="Question Register And Softening Frames")
+
+    text = path.read_text(encoding="utf-8")
+    assert written
+    assert "| 2026-03-01 | lib | 3/4 | register |" in text
+    assert "| 2026-03-01 | 1 | 3/4 | 4/6 | Question Register And Softening Frames |" in text
+    assert "| 2026-01-01 | old | 4/4 | — |" in text, "the row already there was lost"
+
+
+def test_a_tracker_without_the_tables_is_left_alone(tmp_path):
+    path = tmp_path / "asking_memory.md"
+    path.write_text("# Question Practice Memory\n\n## Patterns\n", encoding="utf-8")
+
+    assert not asking.append_log_rows(path, date="2026-03-01", runs=[])
+    assert "2026-03-01" not in path.read_text(encoding="utf-8")
+
+
+def test_the_memory_digest_finds_the_pattern_to_watch(tmp_path):
+    path = tmp_path / "asking_memory.md"
+    path.write_text(
+        "# Question Practice Memory\n\n## Patterns\n\n"
+        "### Embedded Question Word Order\n\nStatus: Active\nSessions with an error: 1\n"
+        "Last error: 2026-01-01\nTypical examples:\nNotes: repaired on the first flag.\n\n"
+        "### Question Register And Softening Frames\n\nStatus: Active\n"
+        "Sessions with an error: 3\nLast error: 2026-02-01\nNotes: **over-hedging** plus a "
+        "broad request.\n\n"
+        "## Register notes\n\n**Peer, low stakes — fine.** Nothing to add.\n\n"
+        "Prose with no lead.\n", encoding="utf-8")
+
+    memory = asking.parse_memory(path)
+
+    assert memory.usable
+    assert memory.worst.name == "Question Register And Softening Frames"
+    assert "broad request" in memory.worst.note
+    assert memory.register_notes == ["Peer, low stakes — fine."]
+
+
+def test_a_missing_tracker_is_not_fatal(tmp_path):
+    memory = asking.parse_memory(tmp_path / "nothing.md")
+
+    assert not memory.usable and memory.patterns == []

@@ -15,7 +15,8 @@ Two stages:
 
 1. **Extraction** — turns raw recordings into a plain list of **only your
    sentences**, in the order you said them.
-2. **Coaching memory** — a Claude Code workflow (`CLAUDE.md`) that reads
+2. **Coaching memory** — a Claude Code workflow (the `analyze-recording`
+   skill, dispatched from `CLAUDE.md`) that reads
    that transcript, analyzes your grammar, and maintains a persistent
    `analysis/memory.md` across every recording — so mistakes get tracked as
    trends (recurring / improving / regressed), not re-discovered from
@@ -57,12 +58,12 @@ If it's just you talking (a journal, a monologue) — steps 2 through 4 are
 skipped entirely with `--no-diarization`, and transcription runs on the whole
 file, where whisper does its own splitting by pauses.
 
-## Stage 2 — Coaching memory (Claude Code + `CLAUDE.md`)
+## Stage 2 — Coaching memory (Claude Code + the `analyze-recording` skill)
 
 ```
  ┌───────────────────┐     ┌───────────────────┐     ┌────────────────────┐
  │ lines.json        │ ──> │ Claude Code       │ ──> │ analysis/sessions/ │
- │ (+ fluency.json,  │     │ reads CLAUDE.md,  │     │ YYYY-MM-DD.md      │
+ │ (+ fluency.json,  │     │ reads the skill,  │     │ YYYY-MM-DD.md      │
  │  from Stage 1)    │     │ skips the low-    │     │ (this session's    │
  │                   │     │ confidence lines, │     │  coaching report)  │
  │                   │     │ compares against  │     │                    │
@@ -93,7 +94,7 @@ of your English improving (or not) over time.
 | `analysis/memory_archive.md` | Long-resolved mistakes get moved here so `memory.md` itself stays short and readable |
 | `analysis/scores_history.csv` | Append-only numeric record (CEFR, scores, filler rate) per session — for graphing progress later, separate from the readable text in `memory.md` |
 | `analysis/mistakes.csv` | Append-only record of which mistake categories occurred how often, per session, against that session's reliable-word count. The machine-readable spine under `memory.md`'s prose counters: `python -m voxlib.mistakes` renders it as a trend table ranked by impact |
-| `analysis/conversation_focus_log.md` | Written only by Conversation Practice Mode (the other mode in this same `CLAUDE.md`, triggered by "let's practice" instead of "analyze the recording") — tracks which `memory.md` patterns were drilled in dialogue and when. Recording analysis reads it for context (to flag a mistake that was drilled in practice but is still occurring) but never writes to it — see "Same repo, second mode" below |
+| `analysis/conversation_focus_log.md` | Written only by Conversation Practice Mode (the `practice-answer` skill, triggered by "let's practice" instead of "analyze the recording") — tracks which `memory.md` patterns were drilled in dialogue and when. Recording analysis reads it for context (to flag a mistake that was drilled in practice but is still occurring) but never writes to it — see "Same repo, second mode" below |
 
 ## Why it's built this way
 
@@ -132,7 +133,7 @@ of your English improving (or not) over time.
 - **Category names must stay consistent across sessions** — if "article
   errors" quietly became "determiner issues" next week, the occurrence count
   would look like two separate one-off mistakes instead of one recurring
-  pattern. `CLAUDE.md` explicitly requires reusing existing category names
+  pattern. the workflow explicitly requires reusing existing category names
   from `memory.md`.
 - **`[?]`-marked lines are excluded from grammar judgment** — a line whisper
   wasn't sure it heard can't tell you anything about how it was spoken, so
@@ -152,7 +153,7 @@ of your English improving (or not) over time.
   anchor, an LLM re-estimating CEFR/grammar/vocabulary/naturalness/fluency
   from scratch each session tends to wobble up and down a little even with
   no real change — noise that would masquerade as progress or decline.
-  `CLAUDE.md` requires a concrete reason from the transcript before moving
+  the workflow requires a concrete reason from the transcript before moving
   any score from its previous value.
 - **Fluency is tracked separately from grammar.** Filler-word frequency
   ("um", "uh") says something real about how fluently you speak, but it's
@@ -189,8 +190,9 @@ of your English improving (or not) over time.
 - **Progress is cached per file** (Stage 1) — diarization and transcription
   are the slow steps. A crash shouldn't mean starting over.
 - **Same repo, second mode, each side writes only its own file.** This
-  `CLAUDE.md` also has a second mode — Interactive Conversation Practice,
-  triggered by "let's practice" instead of "analyze the recording" — for
+  this project also has a second mode — Interactive Conversation Practice,
+  the `practice-answer` skill, triggered by "let's practice" instead of
+  "analyze the recording" — for
   typed dialogue drills targeted at your actual recurring mistakes instead
   of random topics. It reads `memory.md` to pick what to drill but never
   writes to it: mixing typed-conversation practice into the scores tracked

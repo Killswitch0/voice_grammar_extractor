@@ -689,3 +689,68 @@ def test_the_cli_records_the_mode_it_was_given(tmp_path: Path, capsys):
     capsys.readouterr()
 
     assert practice.load(path)[0].mode == practice.ASK_MODE
+
+
+# --- Question Practice Mode's scenarios (Q10, Q16) ---------------------------
+#
+# The scenario results used to be typed into a markdown table by hand at the end
+# of a session, which is the point at which a step is most likely to be skipped —
+# and the table was the only record, so a skipped write left no trace at all.
+
+def _asking_memory(tmp_path: Path) -> Path:
+    path = tmp_path / "asking_memory.md"
+    path.write_text(
+        "# Question Practice Memory\n\n## Scenario log\n\n"
+        "| Date | Scenario | Criteria met | Failed |\n|---|---|---|---|\n\n"
+        "## Session history\n\n"
+        "| Date | Scenarios | Criteria met | Drill score | Biggest problem |\n"
+        "|---|---|---|---|---|\n", encoding="utf-8")
+    return path
+
+
+def test_closing_an_asking_session_records_its_scenarios(tmp_path):
+    from voxlib import asking as asking_module
+
+    memory = _asking_memory(tmp_path)
+
+    outcome = _close(tmp_path, mode="ask",
+                     scenarios=["fixture-library-card:3/4:register", "fixture-borrow-a-bike:4/4"],
+                     scenarios_dir=Path(__file__).parent / "fixtures" / "asking" / "scenarios",
+                     scenario_history=tmp_path / "asking_scenarios.csv",
+                     asking_memory=memory)
+
+    runs = asking_module.load_history(tmp_path / "asking_scenarios.csv")
+    assert [r.scenario for r in runs] == ["fixture-library-card", "fixture-borrow-a-bike"]
+    assert runs[0].failed == ["register"]
+    assert runs[0].register == "stranger", "the register came from the pack, not by hand"
+    assert [r.scenario for r in outcome.scenarios] == [r.scenario for r in runs]
+
+    text = memory.read_text(encoding="utf-8")
+    assert "| fixture-library-card | 3/4 | register |" in text
+    assert "| 7/8 |" in text, "the session row didn't total the criteria"
+
+
+def test_scenarios_are_refused_outside_asking_mode(tmp_path):
+    """They are Question Practice Mode's measurement, and a row in the answering
+    denominator would be a session that never happened."""
+    with pytest.raises(ValueError, match="--mode ask"):
+        _close(tmp_path, scenarios=["fixture-library-card:3/4"],
+               scenarios_dir=Path(__file__).parent / "fixtures" / "asking" / "scenarios",
+               scenario_history=tmp_path / "asking_scenarios.csv")
+
+
+def test_a_dry_run_writes_no_scenario_history(tmp_path):
+    memory = _asking_memory(tmp_path)
+
+    _close(tmp_path, mode="ask", dry_run=True, scenarios=["fixture-library-card:4/4"],
+           scenarios_dir=Path(__file__).parent / "fixtures" / "asking" / "scenarios",
+           scenario_history=tmp_path / "asking_scenarios.csv", asking_memory=memory)
+
+    assert not (tmp_path / "asking_scenarios.csv").exists()
+    assert "fixture-library-card" not in memory.read_text(encoding="utf-8")
+
+
+def test_an_answering_session_still_closes_without_any_scenario_arguments(tmp_path):
+    outcome = _close(tmp_path)
+
+    assert outcome.scenarios == []

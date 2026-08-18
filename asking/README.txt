@@ -67,6 +67,14 @@ fill-in-the-blank exercise with a story attached. The reply is answered in role
 and is deliberately incomplete, because on a real team the first answer almost
 never is, and asking again is the actual skill.
 
+How a session uses this directory: `python -m voxlib.practice start --mode ask`
+reads both halves, draws the warm-up block from drills/ and picks four to six
+scenarios — never-run first, then whichever criteria failed last time, taking one
+register before it takes a second of any. What has run and how it scored lives in
+analysis/asking_scenarios.csv, written by `python -m voxlib.practice end
+--scenario`; the markdown table in analysis/asking_memory.md is a rendering of
+that file rather than the record itself.
+
 `criteria`: a scenario's answer space is open — "Does that affect us?" and "Is
 our service affected?" are both right and no regex covers both — so scenarios
 are scored against these instead. Each is a yes/no judgement against a written

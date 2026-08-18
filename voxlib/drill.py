@@ -659,8 +659,19 @@ def read_block(path: Path) -> Optional[PendingBlock]:
     return PendingBlock(BLOCKED, [(name, item_id) for item_id in ids], answers)
 
 
-def record_answer(path: Path, answer: str) -> PendingBlock:
-    """Append one answer to the pending block, in the order the prompts were asked."""
+def record_answers(path: Path, answers: list[str]) -> PendingBlock:
+    """
+    Append answers to the pending block, in the order the prompts were asked.
+
+    Several at once because the block does not have to be asked one prompt per
+    message. Handing over all six and taking the six answers back in one reply
+    measures exactly the same thing — the drill is written, with time to think,
+    and it is scored against a key at the end either way — while costing one
+    exchange instead of six. What it must not do is shift the pairing: the
+    answers are appended in order, so answer *n* still belongs to prompt *n*,
+    and a prompt that went unanswered has to be recorded as an empty string
+    rather than skipped.
+    """
     block = read_block(path)
     if block is None:
         raise ValueError(
@@ -673,10 +684,23 @@ def record_answer(path: Path, answer: str) -> PendingBlock:
             f"drawing another."
         )
 
+    room = len(block.items) - len(block.answers)
+    if len(answers) > room:
+        raise ValueError(
+            f"{len(answers)} answers given but only {room} prompt(s) left unanswered. "
+            f"They are paired with the prompts by position, so recording extras would "
+            f"score answers against prompts nobody was asked."
+        )
+
     data = _read_pending(path)
-    data["answers"] = block.answers + [answer]
+    data["answers"] = block.answers + list(answers)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return read_block(path)
+
+
+def record_answer(path: Path, answer: str) -> PendingBlock:
+    """One answer — `record_answers` with a single item."""
+    return record_answers(path, [answer])
 
 
 def undo_answer(path: Path) -> Optional[str]:
@@ -830,8 +854,11 @@ def main(argv: list[str] | None = None) -> int:
                           "ranking — this session's focus. Repeatable.")
 
     answer_cmd = sub.add_parser(
-        "answer", help="Record one answer to the pending block, as it is given")
-    answer_cmd.add_argument("text", nargs="?", help="What they said, verbatim")
+        "answer", help="Record answers to the pending block, as they are given")
+    answer_cmd.add_argument("text", nargs="*",
+                            help="What they said, verbatim. Several at once when the block "
+                                 "was handed over as one message — in prompt order, with an "
+                                 'empty string ("") for a prompt they skipped.')
     answer_cmd.add_argument("--undo", action="store_true",
                             help="Drop the last recorded answer (for one written down wrong, "
                                  "not one they went on to repair)")
@@ -961,9 +988,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Removed: {removed}" if removed else "Nothing recorded to remove.")
             return 0 if removed else 1
         if not args.text:
-            parser.error("What did they say? Pass the answer, or --undo.")
+            parser.error("What did they say? Pass the answer(s), or --undo.")
         try:
-            block = record_answer(args.pending, args.text)
+            block = record_answers(args.pending, list(args.text))
         except ValueError as error:
             parser.error(str(error))
         print(f"{len(block.answers)} of {len(block.items)} answered.")
