@@ -5,6 +5,8 @@ voice_reference/*
 !voice_reference/README.txt
 drills/*
 !drills/README.txt
+asking/*
+!asking/README.txt
 output/
 analysis/sessions/*
 !analysis/sessions/README.txt
@@ -19,6 +21,10 @@ analysis/drill_pending.json
 analysis/processed.json
 analysis/conversation_focus_log.md
 analysis/practice_history.csv
+analysis/asking_memory.md
+analysis/asking_drills.csv
+analysis/asking_drill_items.csv
+analysis/asking_pending.json
 analysis/.gitignore
 analysis/drills/
 

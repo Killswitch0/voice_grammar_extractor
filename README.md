@@ -502,6 +502,64 @@ sentences; there's nothing generic to ship. Ask Claude to write one — it does
 this automatically when your current focus has no drill yet. See
 [`drills/README.txt`](drills/README.txt) for the file format.
 
+## Practising questions
+
+Everything above measures **statements**. The recording is a monologue, so it
+can't contain a question; in practice mode the questions are Claude's and the
+answers are yours. So a question you produced had never once been measured —
+not because it was unimportant, but because none of the instruments could
+generate the data. Every tracked mistake category is about statements, and none
+of them could be about anything else.
+
+Say **"let's practice asking"** and the roles swap. Claude describes a
+situation; you have to ask your way out of it.
+
+```
+Standup just ended. Ravi mentioned in passing that the payments service is
+being migrated on Friday. You own a service that reads from it, and you don't
+know whether Friday touches you. He's already half-out of the call.
+
+  -> ask Ravi one question
+```
+
+You ask. Claude answers **in role** — and the answer is deliberately
+incomplete, the way a busy colleague's first answer usually is, so you have to
+ask again. Then the exchange gets corrected and scored.
+
+Three things fail independently, and all three are trained:
+
+- **Form** — the auxiliary, the word order, the clause inside `do you know
+  where…`. Three drills cover it, in the ordinary drill format.
+- **Function** — whether the question actually retrieves what you needed. *"Can
+  you tell me more about it?"* is perfectly grammatical and returns another
+  sentence of the same vagueness.
+- **Register** — how it lands. Directness carried straight over from Russian
+  reads as an accusation in an English-speaking team; hedging during an
+  incident is the mirror-image error, and the scenarios include both.
+
+Scenarios can't be scored by pattern — *"Does that affect us?"* and *"Is our
+service affected?"* are both right — so each one carries three or four written
+yes/no criteria instead, and the count of them is the denominator. `17/20
+criteria` means the same thing next month.
+
+### Where it lives
+
+[`asking/`](asking/README.txt) is gitignored, exactly like `drills/`,
+`recordings/` and `analysis/`. The reason is the same one: each scenario's
+`trap` line is a reconstruction of a mistake *you* actually make, and the
+scenarios worth writing are the situations that actually happened to *you* — so
+the directory fills up with your own material even where it starts out generic.
+
+That means it is empty on a fresh clone, and Claude writes the content with you.
+An invented example of both formats — one question drill, one scenario pack —
+is committed in [`tests/fixtures/asking/`](tests/fixtures/asking/), so the
+format has a reference and the test suite has something to run against.
+
+The rule for adding your own is the same as for drills: write the situations
+that went badly. Vary who you're talking to more than where you are — five
+peer-level work situations train less than one peer, one manager and one
+stranger.
+
 ## Installing as a console command
 
 If you don't want to type `python main.py` every time:

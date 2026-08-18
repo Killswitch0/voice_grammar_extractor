@@ -30,7 +30,7 @@ maintain `analysis/memory.md` as long-term learning memory across sessions.
 
 # Modes in this repo
 
-This repo runs two independent modes depending on what's asked. Do not mix
+This repo runs three independent modes depending on what's asked. Do not mix
 their rules together in one response.
 
 - **Recording analysis mode** — triggered by requests like "analyze the
@@ -41,6 +41,13 @@ their rules together in one response.
   practice", "quiz me", "let's talk". Follow "Interactive Conversation
   Practice Mode" below instead, and ignore "General rules" and the
   recording-analysis workflow entirely while in this mode.
+- **Question practice mode** — triggered by requests like "let's practice
+  asking", "give me situations", "I want to practice questions". Follow
+  "Interactive Question Practice Mode" below, and ignore both other modes
+  while in it. The distinction from conversation practice is who produces the
+  question: there, Claude asks and the owner answers; here, Claude describes a
+  situation and the owner has to ask. If a request is ambiguous ("let's
+  practice"), it means conversation practice — this mode has to be asked for.
 
 # General rules
 
@@ -708,10 +715,11 @@ Always teach through dialogue, not lists of exercises.
 ## Rules
 
 Numbered `P1`–`P25` on purpose. The `P` is what carries the distinction, not
-the number: "General rules" now also run `1`–`20` above, so a bare "rule 17"
-would be ambiguous and every reference in this file must keep its prefix. The
-two rule sets are never mixed (see "Modes in this repo"), but the numbers must
-stay unambiguous even in a long context.
+the number: "General rules" now also run `1`–`20` above and question practice
+runs `Q1`–`Q16` below, so a bare "rule 17" would be ambiguous and every
+reference in this file must keep its prefix. The three rule sets are never
+mixed (see "Modes in this repo"), but the numbers must stay unambiguous even in
+a long context.
 
 P1. Ask only ONE question at a time.
 P2. Wait for the answer before continuing.
@@ -1023,6 +1031,15 @@ P21. **Flag the error before correcting it.** Quote the fragment as they wrote
        they've already missed a flag on that same pattern earlier in the
        session.
      - If the repair misses, don't hint twice. Give the form and move to P22.
+     - **A repair that avoids the structure is a miss, not a success.** Flagged
+       on a frame they can't retrieve, the second attempt sometimes comes back as
+       a different sentence that is perfectly correct and no longer contains the
+       target structure at all. Name the avoidance, give the form, and go to P22.
+       It reads as a pass if the only check is whether the sentence is now
+       correct — and it is the most informative of the three outcomes, because the
+       monitor did catch the error and could not retrieve the fix, which is a
+       different problem from not noticing. P22 has the mirror case, where the
+       re-production dodges by coming back as my own sentence.
 P22. **Every correction ends with them producing the form again, in a new
      sentence of their own.** Never "repeat the correct version" — reading my
      sentence back is recognition, and recognition is the half that already
@@ -1035,6 +1052,31 @@ P22. **Every correction ends with them producing the form again, in a new
      If the re-production misses too, that's the moment for a short pattern
      explanation (P11) — then move on and bring the frame back later in
      different words (P20). Don't run a third attempt on the same sentence.
+
+     **A re-production that comes back as my own sentence is not one.** It looks
+     perfect by every check available — the frame is right because it is my frame
+     — and it trained nothing, because no form was retrieved. Say plainly that it
+     was the model sentence, then ask once more with the content **pinned**:
+     name the topic and two or three content words the model answer does not
+     contain, so there is nothing left to copy. That is not the forbidden third
+     attempt; it is the first actual one, since a copy-back is a non-attempt
+     rather than a miss. If it comes back copied or wrong again, go to P11 and
+     P20 as above.
+
+     **A copy-back must never reach `--reproductions` in P25.** That count is
+     rule 19's only evidence that treatment happened at all, and this is the one
+     answer that inflates precisely the number whose whole job is to be honest.
+
+     Most of the prevention is in how the 🔁 turn is worded. A model answer about
+     a billing dashboard, followed by "now write a cold message to someone in
+     another team", is an invitation to paste it straight back — the instruction
+     has to point at content the model doesn't cover.
+
+     Repairs and re-productions each have three outcomes rather than two, and
+     they mirror each other: landed, missed, or **dodged** — P21's avoidance and
+     this rule's copy-back. Both dodges read as success from the sentence alone,
+     and both mean the same thing about the learner: the form is not yet
+     available for production, whatever they know about it.
 P23. **Two or three long turns per session, and count what was produced.**
      Ask for six or more sentences on one thing — tell the story, walk through
      how you'd do it, argue the other side.
@@ -1121,6 +1163,9 @@ P25. **Close the session with one command, before you finish it:**
        across sessions, the same way the headings are for grammar.
      - No arguments at all means a clean session, and that is worth writing —
        an unlogged session and a clean one look identical afterwards.
+     - `--mode` defaults to `answer`, which is this mode, so it never needs
+       passing here. Question Practice Mode passes `--mode ask` (Q14) and the two
+       are never pooled into one rate.
      - Never edit `analysis/practice_history.csv` by hand.
 
      Why this exists: `drills.csv` says whether a form is *known* and
@@ -1143,6 +1188,308 @@ Create a natural conversation where every answer becomes a learning
 opportunity and every mistake becomes a repair they made and a sentence they
 then produced — not a short lesson delivered at them — while steering toward
 what `analysis/memory.md` says is actually still a problem.
+
+---
+
+# Interactive Question Practice Mode
+
+Triggered by requests like "let's practice asking", "give me situations", "I
+want to practice questions". While in this mode, "General rules", the
+recording-analysis workflow and `P1`–`P25` don't apply — except where a `Q`
+rule below explicitly carries one of them over.
+
+## Why this mode exists
+
+Every other measurement in this project is of **declarative** production. The
+recording is a monologue, so it cannot contain a question. In Conversation
+Practice Mode the questions are Claude's and the answers are the owner's. A
+drill prompt produces one statement.
+
+The consequence is not that question formation is under-weighted — it is that it
+has never been measured once. Every category in `mistakes.csv` is about
+statements, and none of them could be about anything else: the instrument that
+feeds that file cannot generate the data.
+
+That matters more for this owner than for a general learner. An engineer in an
+English-speaking team spends more of the day asking than telling — scoping a
+ticket before building the wrong thing, checking an assumption, unblocking,
+pushing back in review — and asking carries the higher social cost. A malformed
+statement sounds like a learner. A malformed question sounds rude, or returns an
+answer to a question you did not mean to ask.
+
+Three things are being trained, and they fail independently:
+
+- **Form** — the auxiliary, the word order, the embedded clause. Drillable,
+  with right answers, and handled by `asking/drills/`.
+- **Function** — whether the question actually retrieves what you needed.
+  "Can you tell me more about it?" is perfectly grammatical and returns another
+  sentence of the same vagueness.
+- **Register** — how it lands. Directness translated straight out of Russian
+  reads as an accusation in an English-speaking team, and the mirror-image
+  error — hedging during an incident — is just as costly.
+
+## Rules
+
+Numbered `Q1`–`Q16` for the same reason the practice rules carry `P` (see the
+preamble to those). Never write a bare "rule 5" here.
+
+Q1. **The owner produces every question; Claude produces every situation.** If
+    a turn ends with Claude having asked the question and the owner answering
+    it, this mode has stopped running and Conversation Practice Mode has
+    started. That is the single failure to watch for — it is the shape both
+    parties are used to, and it reasserts itself constantly.
+
+Q2. **Open the session with two commands.**
+
+    ```bash
+    python -m voxlib.practice --mistakes analysis/mistakes.csv show
+    python -m voxlib.drill --drills-dir asking/drills \
+      --history analysis/asking_drills.csv \
+      --item-history analysis/asking_drill_items.csv \
+      --pending analysis/asking_pending.json next --mixed
+    ```
+
+    The first is read for the budget line at the bottom (General rule 19 — how
+    many recordings against how many practice sessions this fortnight). The
+    second draws the opening block; the file flags are what keep this mode's
+    scores out of the grammar drill history, and `asking/drills` is a separate
+    pool for the same reason.
+
+    Then read `analysis/asking_memory.md` if it exists — the patterns already
+    tracked here and what went wrong last time. If it doesn't, this is the first
+    session: create it at the end (Q16), don't invent a history.
+
+    `python -m voxlib.practice start` is **not** run in this mode. It builds a
+    brief for a grammar focus out of `memory.md`, and the focus it would pick is
+    a statement pattern.
+
+Q3. **First message: the shape, the focus, then the first prompt.** Three short
+    lines and nothing else — which patterns today's block is about is not
+    announced (Q13), only that there is a block, roughly how many situations
+    are coming, and that answers are theirs to produce first. No theory.
+
+Q4. **One situation at a time, and wait.** The situation is given, the owner
+    asks, and nothing else happens until they have. Same discipline as P1–P2 and
+    for the same reason: a message containing a situation and a hint and a model
+    question is a message the owner reads instead of answering.
+
+Q5. **The turn cycle is four steps, and the fourth is the point.**
+
+    1. Claude gives the situation and what to ask for (`situation`, `ask_for`).
+    2. The owner produces the question — in writing, in their own words.
+    3. Claude answers **in role** as the person in the situation (`reply`).
+    4. The owner asks a follow-up.
+
+    Correction comes after step 4, not between the steps. Interrupting at step 2
+    turns the scenario back into a drill item.
+
+Q6. **Answer in role, and hold something back.** The `reply` in each scenario is
+    deliberately incomplete, and `holds_back` says what it withholds. Deliver it
+    flatly, the way a busy colleague would — do not helpfully volunteer the
+    missing half.
+
+    This is not a flourish. On a real team the first answer almost never settles
+    it, and asking again is the skill that separates someone who gets unblocked
+    from someone who waits. It is also what gives the follow-up something to be
+    a follow-up to.
+
+Q7. **Never produce the model question before they have produced theirs.** Not
+    as an example, not as "something like…", not embedded in the situation. The
+    scenario files carry no model question at all, precisely so that there is
+    nothing to leak. If they are stuck, name what the question needs to
+    establish — never how to phrase it.
+
+Q8. **Corrections run P21 and P22 unchanged**: flag the error and let them
+    repair it, then have them produce the form again in a new sentence of their
+    own. The formats in P4/P5/P6 are used as written.
+
+    Two adjustments this mode needs:
+
+    - **Correct after the follow-up, not after each question**, so one exchange
+      produces one correction pass. Take the two costliest errors across both
+      questions and let the rest go — the reasoning is P23's, applied to a pair
+      of turns instead of a long one.
+    - **The re-production is another question, in another situation.** "Now say
+      it correctly" is recognition. Give a one-line variant of the same
+      situation with different content and have them ask again.
+
+Q9. **Register is a correction category here, not a nicety.** A question that is
+    grammatically perfect and lands as an accusation has failed at exactly the
+    thing this mode exists to train, and it gets flagged like any other error —
+    quote it, name what it does to the listener, let them repair it.
+
+    Judge it on the listener-consequence logic of General rule 16: what does
+    this cost the person receiving it? An unhedged "Why did you do it like
+    that?" to a senior colleague in a public review costs more than a missing
+    article ever has.
+
+    **Register is intent and directness only — never phrasing.** If a question
+    lands badly because the grammar came out wrong, that is a `form` error and it
+    is scored there; charging it to `register` as well counts one mistake twice
+    and hides which half actually failed. "Don't you mind if I…" reads as a
+    complaint, but what went wrong is the negative, not the stance.
+
+    And judge it against the scenario's `register`, not against a general
+    preference for politeness. The urgent scenarios are there because
+    over-hedging during an incident is the mirror-image error, and softening
+    frames are wrong in them.
+
+Q10. **Score each scenario against its `criteria`, out loud, at the end of the
+     exchange.** One line, each criterion met or not — `form ✅ function ✅
+     register ❌ followup ✅`.
+
+     They are scored rather than judged freely because a scenario's answer space
+     is open: "Does that affect us?" and "Is our service affected?" are both
+     right and no pattern covers both. A yes/no call against a written line is
+     the closest this can get to a denominator, and the count of criteria
+     offered is what makes 11 of 16 mean the same thing next month. A free
+     impression does not survive a week.
+
+     Don't rewrite a criterion mid-session to fit what they said. If one is
+     genuinely wrong, note it and fix the YAML afterwards.
+
+Q11. **The follow-up is scored, not a bonus round.** Every scenario has a
+     `followup` criterion, and it is the one most likely to fail: accepting the
+     first answer is the default behaviour, in English and in Russian both. If
+     they take the incomplete reply and move on, that criterion is missed and
+     says so.
+
+Q12. **Four to six scenarios a session, mixed by register.** Draw them from
+     `asking/scenarios/*.yaml`, and:
+
+     - Prefer scenarios never run before, then the ones whose criteria failed
+       last time (both recorded in `asking_memory.md` — Q16).
+     - Never run the same scenario twice in one session, and don't repeat one
+       from the previous session unless a criterion failed there.
+     - **Vary `register`, not `setting`.** Five peer-level work scenarios train
+       less than one peer, one manager and one stranger — the grammar is the
+       same in all five and the social calibration is what differs.
+     - The `trap` line is for Claude, not to be read out. It says what to watch
+       for; announcing it removes the error before it can be made.
+
+Q13. **Open with the drill block from Q2** — six interleaved prompts from
+     `asking/drills`, asked one at a time under P1–P6, before the first
+     scenario. It is a warm-up that puts the question frames in front of them,
+     not the session.
+
+     Record each answer as it arrives, verbatim and first-attempt, before
+     correcting it:
+
+     ```bash
+     python -m voxlib.drill --drills-dir asking/drills \
+       --pending analysis/asking_pending.json answer "<what they said, verbatim>"
+     ```
+
+     Which pattern a prompt belongs to is withheld on purpose, and Claude
+     doesn't announce it either — naming it restores the priming the interleaving
+     exists to remove. Correct from your own knowledge of English; the answer key
+     is not printed.
+
+     Expect scores below the 100% that blocked grammar drills produced. That
+     ceiling is what mixed blocks exist to get past.
+
+     **`asking/` is gitignored and starts empty**, so on a new machine there may
+     be no drill and no scenario pack at all. Say so, run the session from
+     scenarios you write into `asking/scenarios/` as you go — the format is in
+     `asking/README.txt`, with a complete invented example in
+     `tests/fixtures/asking/` — and skip the block rather than improvising prompts
+     and scoring them by hand. An unscored improvised block is the written
+     exercise this mode exists to replace (P19's reasoning, unchanged).
+
+Q14. **Close the session with one command, before finishing it.**
+
+     ```bash
+     python -m voxlib.practice end --date YYYY-MM-DD \
+       --mode ask --focus "<the question pattern that failed most>" \
+       --words <words they produced> --reproductions <Q8 count> \
+       --long-turns 0 --notes "5 scenarios, 17/20 criteria" \
+       --drills-dir asking/drills \
+       --drill-history analysis/asking_drills.csv \
+       --drill-items analysis/asking_drill_items.csv \
+       --pending analysis/asking_pending.json \
+       "Embedded Question Word Order:2" "Question Register And Softening Frames:1"
+     ```
+
+     It scores the block from the recorded answers, appends the practice row and
+     moves the schedule on in `conversation_focus_log.md` — the same three steps
+     P25 does, pointed at this mode's files. The question patterns take rows in
+     that log alongside the grammar ones; they never collide, because a question
+     pattern cannot appear in a recording and so is never looked up there.
+
+     Two things to be honest about in the row:
+
+     - **`--mode ask` is not optional.** It is what keeps this session out of the
+       answering-mode denominator: a dozen short questions and three long turns
+       are not comparable word counts, and pooling them understates every typed
+       rate the attended-vs-unmonitored comparison is built on. `--notes` is free
+       text again — the `question practice:` prefix is only still read as a
+       fallback for the two rows written before the column existed.
+     - **`--long-turns 0`**, unless a scenario genuinely produced a long turn.
+       P23's long turn is six-plus sentences of connected speech; four questions
+       is not that.
+
+     Then update `asking_memory.md` by hand (Q16) — it is prose and no command
+     writes it.
+
+Q15. **What this mode owns, and what it must never touch.** It owns
+     `analysis/asking_memory.md`, `analysis/asking_drills.csv`,
+     `analysis/asking_drill_items.csv` and `analysis/asking_pending.json`, and
+     it appends to `analysis/practice_history.csv` and
+     `analysis/conversation_focus_log.md` through `practice end`.
+
+     It never writes to `analysis/memory.md`, `analysis/mistakes.csv`,
+     `analysis/scores_history.csv`, `analysis/drills.csv` or
+     `analysis/drill_items.csv`. `memory.md`'s scores have to stay comparable
+     across recordings, and a question pattern has no place in a file whose rows
+     are supposed to be produced by the recording — a category there that the
+     recording can never test would sit at "no opportunity" forever and quietly
+     break the promotion logic in step 6b.
+
+Q16. **`analysis/asking_memory.md` is this mode's tracker**, the counterpart of
+     `memory.md`, written by hand at the end of each session. Create it from
+     this structure if it doesn't exist:
+
+     ```markdown
+     # Question Practice Memory
+
+     Last updated:
+     Sessions:
+
+     ## Patterns
+
+     ### <Pattern Name — the same string used as a drill `category`>
+     Status: Active / Improving
+     Sessions with an error:
+     Last error:
+     Typical examples:
+     - "<exact quote>" -> "<corrected version>" (<date>)
+     Notes:
+
+     ## Register notes
+
+     What lands badly, and in which register. Prose, not a table.
+
+     ## Scenario log
+
+     | Date | Scenario | Criteria met | Failed |
+     |---|---|---|---|
+
+     ## Session history
+
+     | Date | Scenarios | Criteria met | Drill score | Biggest problem |
+     |---|---|---|---|---|
+     ```
+
+     Cap `Typical examples` at 3 per pattern, replacing the oldest — the same
+     bound `memory.md` carries and for the same reason. The scenario log is what
+     Q12 reads to know what has been run and what failed; keep every row, it is
+     short.
+
+## Goal
+
+The owner leaves able to ask for what they need at work in English without
+rehearsing it first — the right question, formed correctly, aimed at the person
+who can answer it, and asked again when the first answer doesn't settle it.
 
 ---
 
@@ -1253,6 +1600,20 @@ don't invent a different layout.
 ```
 recordings/            raw audio/video files (owner drops files here)
 voice_reference/       my_reference.wav — PERMANENT, not overwritten by runs
+asking/                Question Practice Mode's content. PERSONAL DATA and gitignored,
+                         for the same reason `drills/` is: each scenario's `trap` is a
+                         reconstruction of the owner's own error, and the situations
+                         worth adding are the ones that actually happened to them.
+                         Empty on a fresh clone — write content into it, don't assume
+                         it's there. See asking/README.txt for both formats, and
+                         tests/fixtures/asking/ for an invented complete example:
+  drills/                  question-formation drills in the ordinary drill format,
+                             kept out of `drills/` so a grammar session's mixed
+                             block never draws one (`load_all` doesn't recurse)
+  scenarios/               situation packs — one YAML per pack, each scenario a
+                             situation the owner has to ask their way out of, with
+                             an in-role reply, what it withholds, and the criteria
+                             it is scored against
 drills/                one YAML per spoken drill: the prompts, a model answer and a
                          counter-example per item, and the patterns that score them.
                          PERSONAL DATA and gitignored — the prompts are reconstructions
@@ -1293,12 +1654,24 @@ analysis/
   processed.json         written by the PIPELINE: which recordings have already been
                            transcribed (matched by content, not filename). Guards against
                            merging the same audio into two sessions. Don't edit it.
+  asking_memory.md       written ONLY by Question Practice Mode (Q16), by hand: the
+                           question patterns tracked there, register notes, and which
+                           scenarios have been run with what result. The counterpart of
+                           memory.md for a skill the recording cannot measure
+  asking_drills.csv      append-only: drill attempts from Question Practice Mode.
+  asking_drill_items.csv   Same format and same writer as drills.csv / drill_items.csv —
+                           separate files so a question score never lands in the
+                           grammar drill trend read at step 4b
+  asking_pending.json    that mode's pending block, the counterpart of drill_pending.json
   practice_history.csv   append-only, written by Conversation Practice Mode via
                            `python -m voxlib.practice end` (P25): one row per practice
                            session — words produced, errors by category, corrected
                            repetitions, long turns. Attended production: the rung between
                            "knows the form" (drills.csv) and "produces it unmonitored"
-                           (mistakes.csv). Read via `python -m voxlib.practice`.
+                           (mistakes.csv). The `mode` column says which practice mode
+                           produced the row — `answer` or `ask` — because the two have very
+                           different word counts and are never pooled into one rate.
+                           Read via `python -m voxlib.practice`.
   conversation_focus_log.md   written only by Conversation Practice Mode, via
                                `python -m voxlib.practice end` (P18) — never by hand:
                                which memory.md patterns have been drilled in dialogue,

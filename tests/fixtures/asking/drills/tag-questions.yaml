@@ -1,0 +1,56 @@
+# A test fixture, not a real drill.
+#
+# The question drills a person actually uses are built around the errors they
+# actually make, and they sit next to scenarios written from situations that
+# actually happened to them — which makes `asking/` personal data, gitignored the
+# same way `drills/` is. The engine still needs something committed to test
+# itself against, so this file holds invented, textbook-level content that
+# belongs to nobody.
+#
+# It is deliberately small. A real pool has to be several times one session's
+# block or it stops testing the pattern and starts testing the list; a fixture
+# only has to exercise the loader and the scorer.
+name: tag-questions
+category: Test Question Tag
+target: the tag agrees with the statement and flips its polarity
+instructions: |
+  Invented content. Each prompt gives a statement; add the question tag.
+
+items:
+  - prompt: it's raining
+    example: It's raining, isn't it?
+    wrong: It's raining, is it?
+    attempted: \bit's raining\b.*\bis(n't)? it\b
+    correct: \bit's raining\b.*\bisn't it\b
+
+  - prompt: you haven't eaten
+    example: You haven't eaten, have you?
+    wrong: You haven't eaten, haven't you?
+    attempted: \bhaven't eaten\b.*\bhave(n't)? you\b
+    correct: \bhaven't eaten\b.*\bhave you\b
+
+  - prompt: she can swim
+    example: She can swim, can't she?
+    wrong: She can swim, can she?
+    attempted: \bcan swim\b.*\bcan('t)? she\b
+    correct: \bcan swim\b.*\bcan't she\b
+
+  - prompt: they didn't call
+    example: They didn't call, did they?
+    wrong: They didn't call, didn't they?
+    attempted: \bdidn't call\b.*\bdid(n't)? they\b
+    correct: \bdidn't call\b.*\bdid they\b
+
+  # A contrast item: an imperative takes "will you", not a polarity flip. A drill
+  # that only ever inverts teaches "always invert", which is the mirror error.
+  - prompt: close the window
+    example: Close the window, will you?
+    wrong: Close the window, won't you close it?
+    attempted: \bclose the window\b.*\bw(ill|on't) you\b
+    correct: \bclose the window\b.*\bwill you\b
+
+  - prompt: let's start
+    example: Let's start, shall we?
+    wrong: Let's start, don't we?
+    attempted: \blet's start\b.*\b(shall|don't) we\b
+    correct: \blet's start\b.*\bshall we\b
