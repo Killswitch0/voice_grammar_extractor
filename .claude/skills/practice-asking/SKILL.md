@@ -96,26 +96,52 @@ Q4. **One situation at a time, and wait.** The situation is given, the owner
     for the same reason: a message containing a situation and a hint and a model
     question is a message the owner reads instead of answering.
 
-Q5. **The turn cycle is five steps, and the fourth is the point.**
+Q5. **The turn cycle is six steps, and the error is flagged before the reply.**
 
     1. Claude gives the situation and what to ask for (`situation`, `ask_for`).
     2. The owner produces the question — in writing, in their own words.
-    3. Claude answers **in role** as the person in the situation (`reply`).
+    3. Claude steps out of role **immediately** and flags the costliest thing
+       wrong with that question (Q8, stage one). The owner repairs it. Only
+       then does Claude answer **in role** as the person in the situation
+       (`reply`).
     4. The owner asks a follow-up.
-    5. Claude steps out of role: the correction pass (Q8), then the score line
-       (Q10).
+    5. Same again: flag first, repair, then whatever the scenario still owes in
+       role.
+    6. The closing pass: the re-productions (Q8, stage two), the
+       also-not-worked-on list, then the score line (Q10).
 
-    Correction comes after step 4, not between the steps. Interrupting at step 2
-    turns the scenario back into a drill item.
+    **The correction has to arrive while the sentence is still the sentence
+    they are thinking about.** An error named two turns later is one they have
+    to reconstruct before they can repair it, and the in-role reply that came
+    in between has already read as acceptance of the form. This mode used to
+    hold every correction until after the follow-up, so that one exchange
+    produced one tidy correction pass; the cost was that the tidiness came out
+    of the owner's memory of what they had written.
 
-    **Step 5 is not optional and never runs empty.** An exchange that ends at
-    step 4 and goes straight on to the next situation is an exchange the owner
-    learned nothing from — and worse, one where the in-role reply reads as a
-    verdict on their English. A colleague who answers "Sure, have you looked at
-    the cache step?" has answered the question; that says nothing about the
-    sentence that asked it. If both questions were genuinely clean, say so in
-    one line. Silence is not a grade, and it is the one signal here the owner
-    cannot tell apart from "there was nothing worth correcting".
+    Three things immediacy does **not** mean:
+
+    - **Flag one, not all.** At most one error per question is worked at the
+      moment it is made — the costliest. Everything else waits for step 6.
+      Three corrections dropped into the middle of a scenario turn the
+      situation back into a drill item, which is what Q4 exists to prevent.
+    - **The re-production still runs at the close.** Stage two is another
+      question in another situation; asking for it at step 3 abandons the
+      scenario the owner is standing in. Repair now, new sentence at the end.
+    - **In role stays in role.** The flag is out of role and visibly so; the
+      `reply` that follows it is not the place to mention their English. Never
+      break character inside the in-role reply itself.
+
+    **A question that isn't one gets sent back, not answered.** If what they
+    produced is a statement, or a question that doesn't ask for what `ask_for`
+    names, there is nothing for the reply to answer — say what the question
+    still has to establish (never how to phrase it, Q7) and have them ask
+    again, before anyone speaks in role.
+
+    **Step 6 is not optional and never runs empty.** An exchange that stops
+    after the follow-up and goes straight on to the next situation is an
+    exchange the owner learned nothing from. If both questions were genuinely
+    clean, say so in one line. Silence is not a grade, and it is the one signal
+    here the owner cannot tell apart from "there was nothing worth correcting".
 
 Q6. **Answer in role, and hold something back.** The `reply` in each scenario is
     deliberately incomplete, and `holds_back` says what it withholds. Deliver it
@@ -174,13 +200,15 @@ Q8. **Corrections run in two stages: they repair it, then they produce it
     form isn't available for production yet. A copy-back never counts towards
     `--reproductions`.
 
-    Two adjustments this mode needs:
+    Three adjustments this mode needs:
 
-    - **Correct after the follow-up, not after each question**, so one exchange
-      produces one correction pass. Take the two costliest errors across both
-      questions through the two stages above.
+    - **Stage one runs at once, stage two at the close** (Q5). The costliest
+      error in each question is flagged the moment it is produced, before the
+      in-role reply — so an exchange works at most two errors, one per
+      question, and both of them while the owner still has the sentence in
+      their head.
     - **The rest go untreated, not unnamed.** Everything else that was wrong
-      gets one line at the end of the pass — the fragment as they wrote it, the
+      gets one line in the closing pass — the fragment as they wrote it, the
       corrected form, and nothing else:
 
       ```
@@ -202,7 +230,8 @@ Q8. **Corrections run in two stages: they repair it, then they produce it
       from a first occurrence next month.
     - **The re-production is another question, in another situation.** "Now say
       it correctly" is recognition. Give a one-line variant of the same
-      situation with different content and have them ask again.
+      situation with different content and have them ask again — in the closing
+      pass, once the scenario itself is finished.
 
 Q9. **Register is a correction category here, not a nicety.** A question that is
     grammatically perfect and lands as an accusation has failed at exactly the
