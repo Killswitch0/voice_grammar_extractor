@@ -495,6 +495,7 @@ class AskBrief:
     memory: AskingMemory = field(default_factory=AskingMemory)
     last_session: str = ""
     budget: str = ""
+    untracked: str = ""
     notes: list[str] = field(default_factory=list)
 
 
@@ -532,8 +533,11 @@ def build(*, today: str, scenarios_dir: Path, drills_dir: Path, memory_path: Pat
     asking = [s for s in sessions if s.mode == practice_module.ASK_MODE]
     if asking:
         last = asking[-1]
+        repro = f"{last.reproductions} re-productions"
+        if last.reproductions_missed:
+            repro += f" (+{last.reproductions_missed} asked for and not produced)"
         last_session = (f"{last.date} · {last.focus or 'no focus'} · {last.learner_words} words · "
-                        f"{last.errors} errors · {last.reproductions} re-productions")
+                        f"{last.errors} errors · {repro}")
     else:
         last_session = "none recorded yet"
 
@@ -552,6 +556,7 @@ def build(*, today: str, scenarios_dir: Path, drills_dir: Path, memory_path: Pat
     return AskBrief(date=today, scenarios=chosen, block=block, memory=memory,
                     last_session=last_session,
                     budget=practice_module.budget_line(sessions, recording_dates, today),
+                    untracked=practice_module.provisional_line(sessions),
                     notes=notes)
 
 
@@ -578,6 +583,10 @@ def format_brief(brief: AskBrief) -> str:
     lines = [f"ASKING BRIEF — {brief.date}", "=" * 72, "",
              label("Budget") + brief.budget,
              label("Last asking") + brief.last_session]
+    if brief.untracked:
+        # Both modes' forms, deliberately: "help me to get" came out of an asking
+        # session and it is not a question pattern.
+        lines.append(label("Untracked") + brief.untracked)
 
     worst = brief.memory.worst
     if worst:
@@ -655,9 +664,10 @@ def format_brief(brief: AskBrief) -> str:
               "and the log tables (Q14):",
               f"  python -m voxlib.practice end --date {brief.date} --mode ask \\",
               "      --focus '<the question pattern that failed most>' --words <their words> \\",
-              "      --reproductions <Q8> --long-turns 0 \\",
+              "      --reproductions <Q8 landed> --reproductions-missed <didn't land> \\",
+              "      --long-turns 0 \\",
               "      --scenario 'name:3/4:register,followup' --scenario 'name:4/4' \\",
-              "      'Pattern Name:1'"]
+              "      'Pattern Name:1' '?<untracked form>:1'"]
     return "\n".join(lines)
 
 
