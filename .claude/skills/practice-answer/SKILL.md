@@ -331,6 +331,11 @@ P21. **Flag the error before correcting it.** Quote the fragment as they wrote
        they've already missed a flag on that same pattern earlier in the
        session.
      - If the repair misses, don't hint twice. Give the form and move to P22.
+     - **An answer with nothing wrong in it is told so** — one short line,
+       then the next question. Otherwise silence carries two meanings at once,
+       "that was correct" and "that wasn't worth correcting", and the learner
+       has no way to tell them apart: an ordinary conversational reply starts
+       reading as a verdict on the English it was answering.
      - **A repair that avoids the structure is a miss, not a success.** Flagged
        on a frame they can't retrieve, the second attempt sometimes comes back as
        a different sentence that is perfectly correct and no longer contains the
@@ -390,7 +395,25 @@ P23. **Two or three long turns per session, and count what was produced.**
 
      Don't correct a long turn sentence by sentence — that turns it back into
      six short answers. Read the whole thing, then take the two costliest
-     errors through P21/P22 and let the rest go.
+     errors through P21/P22.
+
+     **The rest go untreated, not unnamed.** That is P21's inline correction
+     applied to the whole turn, and a long turn is where it matters most,
+     because it is the turn with the most errors in it. Everything else that
+     was wrong gets one line at the end of the pass — the fragment as they
+     wrote it, the corrected form, nothing else:
+
+     ```
+     Also, not worked on:
+     "he don't know about it" -> "he doesn't know about it"
+     "I am working here since 2020" -> "I've been working here since 2020"
+     ```
+
+     No flag stage, no re-production, no explanation unless a word is being used
+     to mean something it doesn't. Two errors get the treatment that changes
+     production; the list is what keeps the other six from being silently
+     ratified. An error nobody mentions is indistinguishable from one that
+     wasn't made, and it gets produced the same way in the next recording.
 
      At the end of the session, report in chat — words they produced, errors by
      category, how many re-productions they did, and the drill score if there was
@@ -437,9 +460,10 @@ P25. **Close the session with one command, before you finish it:**
 
      ```bash
      python -m voxlib.practice end --date YYYY-MM-DD --focus "<## Mistake Name>" \
-       --words <words they produced> --reproductions <P22 count> \
+       --words <words they produced> --reproductions <P22, landed> \
+       --reproductions-missed <P22, asked for and didn't land> \
        --long-turns <P23 count> --word "you know:2:0" --word "super:0:3" \
-       "Article Errors:3" "Redundant Reflexive Pronoun:1"
+       "Article Errors:3" "Redundant Reflexive Pronoun:1" "?help me to X:1"
      ```
 
      It does the three things that used to be three steps: scores the drill
@@ -454,10 +478,42 @@ P25. **Close the session with one command, before you finish it:**
 
      - `--words` counts **their** words, not the whole dialogue. Estimate it from
        their answers; a rough count is a denominator, and no count is not.
+     - **`--reproductions` counts the ones that landed; `--reproductions-missed`
+       counts the rest** — a repair that missed, a structure dodged (P21), a
+       sentence of mine copied back (P22). Only the landed ones are treatment,
+       and only they reach rule 19's budget. The two are separate because they
+       used to be one: a session that asked for three re-productions and got
+       none back wrote the same row as a session that never offered one, and
+       those are opposite results. The first says the form is not available for
+       production yet; the second says the treatment was skipped.
      - One `"Category:count"` per category that produced an error, using the
        exact `## <Mistake Name>` headings (the same join key rule P15 uses for
-       the focus log). Errors outside any tracked category: leave them out of the
-       counts and mention them in `--notes`.
+       the focus log).
+     - **An error outside every tracked category gets a `?` entry**, quoting the
+       form itself: `"?help me to X:1"`, `"?I am out of context:1"`. That is
+       every line of the also-not-worked-on list from P21 and P23, and the two
+       stages' errors too if they were untracked.
+
+       These are kept out of `errors` and out of every rate — the rows written
+       before the convention have none of them, and a denominator that changes
+       meaning halfway down a column is worse than a missing number. What they
+       get is a count of **sessions**, which is the only question being asked of
+       them: has this happened before.
+
+       They used to go into `--notes` as prose, and the cost was exact. The
+       second occurrence of a form looked identical to the first, so a recurring
+       error stayed invisible for as long as it took someone to reread the notes
+       column and notice a phrase twice — `help me to X` was corrected in two
+       separate sessions before anyone connected them. Quote the form the same
+       way each time; that string is the join key.
+     - **A `?` form that has come up in two sessions stops being one.** `end`
+       says so in its output, and the brief prints it under `Untracked`. Give it
+       a real `## <Mistake Name>`-style category name, write it a drill in
+       `drills/` (P19's format), and record it under that name from then on —
+       from there the schedule in `conversation_focus_log.md` treats it like any
+       other pattern. Once is a slip; the same slip in two separate sessions is
+       a pattern, and a pattern nothing drills is one that only ever gets
+       corrected again.
      - One `--word "phrase:slips:replacements"` per banned phrase (P24), using
        the phrase exactly as the brief printed it — that string is the join key
        across sessions, the same way the headings are for grammar.

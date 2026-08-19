@@ -96,15 +96,26 @@ Q4. **One situation at a time, and wait.** The situation is given, the owner
     for the same reason: a message containing a situation and a hint and a model
     question is a message the owner reads instead of answering.
 
-Q5. **The turn cycle is four steps, and the fourth is the point.**
+Q5. **The turn cycle is five steps, and the fourth is the point.**
 
     1. Claude gives the situation and what to ask for (`situation`, `ask_for`).
     2. The owner produces the question — in writing, in their own words.
     3. Claude answers **in role** as the person in the situation (`reply`).
     4. The owner asks a follow-up.
+    5. Claude steps out of role: the correction pass (Q8), then the score line
+       (Q10).
 
     Correction comes after step 4, not between the steps. Interrupting at step 2
     turns the scenario back into a drill item.
+
+    **Step 5 is not optional and never runs empty.** An exchange that ends at
+    step 4 and goes straight on to the next situation is an exchange the owner
+    learned nothing from — and worse, one where the in-role reply reads as a
+    verdict on their English. A colleague who answers "Sure, have you looked at
+    the cache step?" has answered the question; that says nothing about the
+    sentence that asked it. If both questions were genuinely clean, say so in
+    one line. Silence is not a grade, and it is the one signal here the owner
+    cannot tell apart from "there was nothing worth correcting".
 
 Q6. **Answer in role, and hold something back.** The `reply` in each scenario is
     deliberately incomplete, and `holds_back` says what it withholds. Deliver it
@@ -167,7 +178,28 @@ Q8. **Corrections run in two stages: they repair it, then they produce it
 
     - **Correct after the follow-up, not after each question**, so one exchange
       produces one correction pass. Take the two costliest errors across both
-      questions and let the rest go.
+      questions through the two stages above.
+    - **The rest go untreated, not unnamed.** Everything else that was wrong
+      gets one line at the end of the pass — the fragment as they wrote it, the
+      corrected form, and nothing else:
+
+      ```
+      Also, not worked on:
+      "help me to fix it" -> "help me fix it"
+      "I know that you debugged this" -> "I know you've debugged this"
+      ```
+
+      No flag stage, no re-production, no explanation unless a word is being
+      used to mean something it doesn't. Two errors an exchange get the
+      treatment that changes production; this list is what stops the other four
+      from being silently ratified. An error the owner is never told about is
+      one they will produce the same way at work next week — and this mode is
+      the only place a malformed *question* of theirs is ever seen at all.
+
+      **Every line of that list is recorded at the end of the session**, under a
+      tracked pattern name if one covers it and as a `?` entry if none does
+      (Q14). A form named in chat and nowhere else is a form nobody can tell
+      from a first occurrence next month.
     - **The re-production is another question, in another situation.** "Now say
       it correctly" is recognition. Give a one-line variant of the same
       situation with different content and have them ask again.
@@ -208,6 +240,13 @@ Q10. **Score each scenario against its `criteria`, out loud, at the end of the
 
      Don't rewrite a criterion mid-session to fit what they said. If one is
      genuinely wrong, note it and fix the YAML afterwards.
+
+     **The score line follows the correction pass; it never replaces it.**
+     `form ❌` names a criterion, not a mistake — the owner cannot reconstruct
+     which words lost it, and a scenario scored 2/4 with nothing quoted back is
+     a grade without a lesson. Every ❌ has to be traceable to something Q8
+     already quoted, either in the two worked corrections or in the
+     also-not-worked-on list.
 
 Q11. **The follow-up is scored, not a bonus round.** Every scenario has a
      `followup` criterion, and it is the one most likely to fail: accepting the
@@ -295,11 +334,13 @@ Q14. **Close the session with one command, before finishing it.**
      ```bash
      python -m voxlib.practice end --date YYYY-MM-DD --mode ask \
        --focus "<the question pattern that failed most>" \
-       --words <words they produced> --reproductions <Q8 count> --long-turns 0 \
+       --words <words they produced> --reproductions <Q8, landed> \
+       --reproductions-missed <Q8, asked for and didn't land> --long-turns 0 \
        --scenario "standup-migration:4/4" \
        --scenario "estimate-pressure:2/4:form,followup" \
        --notes "5 scenarios, 17/20 criteria" \
-       "Embedded Question Word Order:2" "Question Register And Softening Frames:1"
+       "Embedded Question Word Order:2" "Question Register And Softening Frames:1" \
+       "?help me to X:1"
      ```
 
      It scores the block from the recorded answers, appends the practice row,
@@ -320,6 +361,33 @@ Q14. **Close the session with one command, before finishing it.**
        for a scenario in the pool — the YAML knows how many criteria it has, and
        a hand-typed denominator that disagrees with it is a number nobody can
        interpret later. A scenario with nothing failed takes no third field.
+     - **`--reproductions` counts the ones that landed; `--reproductions-missed`
+       counts the rest** — a repair that missed, a structure dodged, a sentence
+       of mine copied back (Q8's three outcomes). Only the landed ones are
+       treatment and only they reach rule 19's budget. The two are separate
+       because they used to be one number: the session of 2026-08-18 attempted
+       two re-productions, both missed, and wrote `0` — indistinguishable from a
+       session that never offered the treatment at all, which is the opposite
+       result.
+     - **An error no tracked pattern covers gets a `?` entry**, quoting the form
+       itself: `"?help me to X:1"`, `"?I am out of context:1"`. That is every
+       line of Q8's also-not-worked-on list. They stay out of `errors` and out
+       of every rate — the rows written before the convention have none of them
+       — and what they get instead is a count of **sessions**, which is the only
+       question being asked of them: has this happened before.
+
+       This is where "untracked forms worth remembering" in `asking_memory.md`
+       came from, written as prose because there was nowhere else to put it. Two
+       of those had already occurred twice by the time anyone noticed. Quote the
+       form the same way each time; that string is the join key, and it is
+       shared with the answering mode on purpose — `help me to X` is not a
+       question pattern and it came out of an asking session.
+     - **A `?` form that has come up in two sessions stops being one.** `end`
+       says so in its output and the brief prints it under `Untracked`. Give it
+       a real category name, write it a drill — in `asking/drills/` if it is
+       about question formation, in `drills/` if it isn't — and record it under
+       that name from then on. Once is a slip; twice is a pattern, and a pattern
+       nothing drills is one that only ever gets corrected again.
      - **`--long-turns 0`**, unless a scenario genuinely produced a long turn.
        Six-plus sentences of connected speech is a long turn; four questions is
        not.

@@ -363,6 +363,7 @@ class Brief:
     budget: str
     word_history: dict = field(default_factory=dict)   # phrase -> practice.WordTrend
     typed_vs_spoken: str = ""
+    untracked: str = ""
     notes: list[str] = field(default_factory=list)
 
 
@@ -454,8 +455,11 @@ def build(*, today: str, memory_path: Path, focus_log_path: Path, mistakes_path:
     if sessions:
         last = sessions[-1]
         rate = "—" if last.rate_per_1000 is None else f"{last.rate_per_1000:.2f}/1k"
+        repro = f"{last.reproductions} re-productions"
+        if last.reproductions_missed:
+            repro += f" (+{last.reproductions_missed} asked for and not produced)"
         last_session = (f"{last.date} · {last.focus or 'no focus'} · {last.learner_words} words · "
-                        f"{last.errors} errors ({rate}) · {last.reproductions} re-productions")
+                        f"{last.errors} errors ({rate}) · {repro}")
     else:
         last_session = "none recorded yet"
 
@@ -480,6 +484,7 @@ def build(*, today: str, memory_path: Path, focus_log_path: Path, mistakes_path:
         last_session=last_session,
         budget=practice_module.budget_line(sessions, recording_dates, today),
         typed_vs_spoken=typed_vs_spoken,
+        untracked=practice_module.provisional_line(sessions),
         notes=notes,
     )
 
@@ -529,6 +534,8 @@ def format_brief(brief: Brief) -> str:
             lines.append(label("") + f"{v.word} → {v.replacement}  ({note})")
 
     lines += ["", label("Last session") + brief.last_session, label("Budget") + brief.budget]
+    if brief.untracked:
+        lines.append(label("Untracked") + brief.untracked)
 
     if brief.block:
         lines += ["", f"Mixed block — {len(brief.block.prompts)} prompts, "
@@ -554,8 +561,9 @@ def format_brief(brief: Brief) -> str:
     lines.append("At the end — scores the block, writes the row, moves the schedule on "
                  "(P18, P25):")
     lines.append(f"  python -m voxlib.practice end --date {brief.date} --focus {focus_name} "
-                 f"\\\n      --words <their words> --reproductions <P22> --long-turns <P23> "
-                 f"'Category:count'")
+                 f"\\\n      --words <their words> --reproductions <P22 landed> "
+                 f"--reproductions-missed <asked for, didn't land> \\\n      "
+                 f"--long-turns <P23> 'Category:count' '?<untracked form>:count'")
     return "\n".join(lines)
 
 

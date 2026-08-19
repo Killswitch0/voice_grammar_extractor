@@ -754,3 +754,162 @@ def test_an_answering_session_still_closes_without_any_scenario_arguments(tmp_pa
     outcome = _close(tmp_path)
 
     assert outcome.scenarios == []
+
+
+# --- re-productions that did not land ----------------------------------------
+#
+# `reproductions` was one number, and P22 says a copy-back never reaches it — so
+# a session that asked for three re-productions and got none back wrote the same
+# row as a session that never offered one. Those are opposite results: the first
+# means the form is not available for production, the second means the treatment
+# was skipped. `reproductions_missed` is the second number.
+
+def test_the_two_reproduction_counts_survive_the_round_trip(tmp_path: Path):
+    practice.record_session(tmp_path / "p.csv", date="2026-01-05", focus="",
+                            learner_words=300, errors_by_category={},
+                            reproductions=1, reproductions_missed=2)
+
+    session = practice.load(tmp_path / "p.csv")[0]
+
+    assert (session.reproductions, session.reproductions_missed) == (1, 2)
+    assert session.reproductions_attempted == 3
+
+
+def test_a_row_written_before_the_column_existed_reads_as_none_missed(tmp_path: Path):
+    path = tmp_path / "p.csv"
+    path.write_text("date,focus,learner_words,errors,error_breakdown,reproductions,"
+                    "long_turns,notes\n2026-01-05,,300,0,,2,1,\n", encoding="utf-8")
+
+    session = practice.load(path)[0]
+
+    assert session.reproductions_missed == 0
+    assert session.reproductions_attempted == 2
+
+
+def test_a_negative_missed_count_is_refused(tmp_path: Path):
+    with pytest.raises(ValueError):
+        practice.record_session(tmp_path / "p.csv", date="2026-01-05", focus="",
+                                learner_words=300, errors_by_category={},
+                                reproductions_missed=-1)
+
+
+def test_offering_the_treatment_and_getting_nothing_back_reads_differently(tmp_path):
+    """Both sessions score zero repetitions; only one of them never tried."""
+    offered = _close(tmp_path, reproductions=0, reproductions_missed=3)
+    skipped = _close(tmp_path, reproductions=0, reproductions_missed=0,
+                     history_path=tmp_path / "other.csv")
+
+    assert "none landed" in practice.format_outcome(offered)
+    assert "No corrected repetitions" not in practice.format_outcome(offered)
+    assert "No corrected repetitions" in practice.format_outcome(skipped)
+
+
+def test_only_landed_repetitions_count_towards_the_budget():
+    """Rule 19 budgets treatment, and a re-production that didn't come back is
+    not treatment — but the attempt is still worth saying out loud."""
+    sessions = [_session(date="2026-01-05", reproductions=0)]
+    sessions[0].reproductions_missed = 4
+
+    line = practice.budget_line(sessions, [], "2026-01-06")
+
+    assert "0 corrected repetition(s)" in line
+    assert "4 more asked for" in line
+
+
+# --- untracked forms ---------------------------------------------------------
+#
+# These used to go into the free-text `notes` cell, which meant the second
+# occurrence of a form looked exactly like the first and nothing could count
+# them. They go in the breakdown now, under a "?" name.
+
+def test_a_provisional_form_stays_out_of_the_error_count():
+    """The rows already in the file predate the convention. If untracked forms
+    joined `errors`, the per-1,000 rate would change meaning halfway down the
+    column and no trend across it would mean anything."""
+    session = _session(words=500, errors={"Article Errors": 2, "?help me to X": 3})
+
+    assert session.errors == 2
+    assert session.rate_per_1000 == 4.0
+    assert session.provisional == {"?help me to X": 3}
+
+
+def test_a_provisional_form_never_reaches_the_typed_versus_spoken_comparison():
+    sessions = [_session(words=1000, errors={"?help me to X": 5})]
+
+    assert practice.practice_rates(sessions) == {}
+
+
+def test_the_error_column_written_to_the_csv_is_the_tracked_total(tmp_path: Path):
+    practice.record_session(tmp_path / "p.csv", date="2026-01-05", focus="",
+                            learner_words=400,
+                            errors_by_category={"Article Errors": 1, "?give me it": 2})
+
+    row = (tmp_path / "p.csv").read_text(encoding="utf-8").splitlines()[1]
+    session = practice.load(tmp_path / "p.csv")[0]
+
+    assert row.split(",")[3] == "1"
+    assert session.errors_by_category["?give me it"] == 2, "still recorded, just not counted"
+
+
+def test_a_form_seen_once_is_not_ready_to_be_promoted():
+    forms = practice.provisional_trends([_session(date="2026-01-05",
+                                                  errors={"?help me to X": 2})])
+
+    assert [f.name for f in forms] == ["help me to X"]
+    assert forms[0].sessions == 1 and forms[0].total == 2
+    assert not forms[0].ready_to_promote
+
+
+def test_the_same_form_in_two_sessions_earns_a_category_and_a_drill():
+    forms = practice.provisional_trends([
+        _session(date="2026-01-05", errors={"?help me to X": 1}),
+        _session(date="2026-01-09", errors={"?help me to X": 1, "?give me it": 1}),
+    ])
+
+    ready = [f for f in forms if f.ready_to_promote]
+
+    assert [f.name for f in ready] == ["help me to X"]
+    assert (ready[0].first_seen, ready[0].last_seen) == ("2026-01-05", "2026-01-09")
+    assert "Give it a category name" in practice.format_provisional(forms)
+
+
+def test_a_form_is_the_same_form_in_both_practice_modes():
+    """"help me to get" came out of an asking session and is not a question
+    pattern. Counting the modes separately is the one reading that hides it."""
+    forms = practice.provisional_trends([
+        _session(date="2026-01-05", errors={"?help me to X": 1}, mode=practice.ANSWER_MODE),
+        _session(date="2026-01-09", errors={"?help me to X": 1}, mode=practice.ASK_MODE),
+    ])
+
+    assert forms[0].ready_to_promote
+
+
+def test_closing_a_session_says_when_a_form_has_earned_its_promotion(tmp_path):
+    _close(tmp_path, date="2026-01-05", errors_by_category={"?help me to X": 1})
+    outcome = _close(tmp_path, date="2026-01-09", errors_by_category={"?help me to X": 1})
+
+    assert any("help me to X" in note and "2 sessions" in note for note in outcome.notes)
+
+
+def test_a_form_that_did_not_come_up_this_session_is_not_announced(tmp_path):
+    _close(tmp_path, date="2026-01-05", errors_by_category={"?help me to X": 1})
+    _close(tmp_path, date="2026-01-09", errors_by_category={"?help me to X": 1})
+    outcome = _close(tmp_path, date="2026-01-12", errors_by_category={"Article Errors": 1})
+
+    assert not any("help me to X" in note for note in outcome.notes)
+
+
+def test_a_provisional_form_does_not_claim_a_slot_in_the_schedule(tmp_path):
+    """It has no drill and no category, so there is nothing for the spaced
+    repetition to be keyed on — and saying its schedule is unchanged is noise."""
+    outcome = _close(tmp_path, errors_by_category={"?help me to X": 1})
+
+    assert not any("Not tested by the block" in note for note in outcome.notes)
+
+
+def test_a_bare_question_mark_is_refused_by_the_cli(tmp_path: Path, capsys):
+    with pytest.raises(SystemExit):
+        practice.main(["--path", str(tmp_path / "p.csv"), "add", "--date", "2026-01-05",
+                       "--words", "300", "?:1"])
+
+    assert "untracked form" in capsys.readouterr().err

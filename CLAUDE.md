@@ -125,7 +125,11 @@ analysis/
   practice_history.csv   append-only, written by both practice modes via
                            `python -m voxlib.practice end`: one row per practice
                            session — words produced, errors by category, corrected
-                           repetitions, long turns. Attended production: the rung between
+                           repetitions (landed and asked-for-but-not-produced,
+                           counted apart), long turns. An error no tracked category
+                           covers is recorded under a `?`-prefixed name quoting the
+                           form itself; two sessions with the same one earns it a
+                           real category and a drill. Attended production: the rung between
                            "knows the form" (drills.csv) and "produces it unmonitored"
                            (mistakes.csv). The `mode` column says which practice mode
                            produced the row — `answer` or `ask` — because the two have very
