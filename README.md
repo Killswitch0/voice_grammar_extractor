@@ -410,11 +410,130 @@ real or just Whisper mishearing you. See
 `.claude/skills/analyze-recording/SKILL.md` for the full workflow and the exact
 `memory.md` format.
 
+### Seeing it as a dashboard
+
+The histories under `analysis/` are correct and hard to read by eye: after ten
+sessions, `mistakes.csv` is a hundred-odd rows that have to be pivoted and
+divided by a denominator that changes every session before they answer "is this
+getting better?". To see them instead:
+
+```bash
+python -m voxlib.dashboard --open
+```
+
+That writes `output/dashboard.html` — a single self-contained page, no network
+access at load. It opens with a short "Do this next" list: the crossing of which
+rung a pattern fails on, how it ranks by impact and what the spaced-repetition
+schedule says is overdue, which otherwise means reading three sections against
+each other. Every line links to the section it came from. A recording the
+pipeline has transcribed but no analysis session has read yet is the first item
+on that list, because until it is read every ranking below it predates it.
+
+The headline says what moved it rather than only that something did: the total
+rate is the sum of the per-category rates, so the biggest contributor to a rise
+or a fall is arithmetic and is named. Below that are the
+mistake rate over time, a heatmap of every tracked
+mistake session by session, one card per mistake ranked by impact, and a ladder
+view that reads the three histories against each other. Rebuild it after each
+session; it only ever reads `analysis/`, never writes to it.
+
+"What to work on" is the part that says what to do next, and it is one
+expandable row per pattern. Three files measure three different things about the
+same mistake — `drills.csv` is whether the form is known,
+`practice_history.csv` is whether it survives attended production, and
+`mistakes.csv` is whether it survives unmonitored speech — and the rung a
+pattern fails on is the diagnosis carried in the collapsed row. A form drilled
+to 100% that still appears in every recording is not a knowledge gap, so more
+drilling is the one thing that will not fix it; a pattern with no drill at all
+cannot be diagnosed above rung 3 until one exists. Opening a row gives that
+pattern's trend — scaled to its own range — its worked examples and its notes
+from `memory.md`, and each row has its own link (`#pattern-article-errors`) so a
+single pattern can be pointed at.
+
+Beside the to-do list is a "What's working" block, because everything else on
+the page is problem-facing and this one is meant to be opened every week for
+months. Nothing on it is rounded in a flattering direction: each line is a
+measurement that moved the right way, and the block is absent entirely when
+none did.
+
+The last two panels cover how the speech itself came out. Pace is grouped by
+`speech_time_basis` and never drawn as one line across it — the two bases put
+the same speaker at roughly 105 and 58 words per minute, so a single line would
+show a collapse in fluency that is purely a change of instrument. Filler and
+discourse-marker rates, median pause and long pauses get one small chart each,
+with a blank wherever the number was not measured rather than a zero: the
+backfilled sessions had no clock, and the pause measures are solo-only by
+design. The reliability table then says how much of each session was analysable
+at all, leading with the word share rather than the line share, because that is
+the reading `fluency.warn_if_unreliable` acts on.
+
+Question Practice Mode gets its own two panels, because a recording cannot
+measure it: whether a question was well asked is not in a transcript, so
+nothing there has an unmonitored-speech rung and every score is shown next to
+the number it divides. Scenario runs are listed individually rather than
+averaged by register or function — with roughly one run per register, a grouped
+score would have a denominator of one — and the criteria that fail across
+different situations are charted instead, since those repeat. The warm-up
+blocks report items offered and items attempted separately, which is the
+difference between "scored 100%" and "answered one question of twelve".
+
+The page ends with a timeline of every dated thing: the union of recordings and
+practice days, each recording linked to its archived report under
+`analysis/sessions/`.
+
+Three things it deliberately does not draw, because the honest version differs
+from the obvious one: an untested session is a hole in the line rather than a
+zero (a blank in `mistakes.csv` means the structure never came up, so nothing
+was measured); a category is not plotted before it was first tracked; and the
+all-categories rate is shown beside the rate over only the categories tracked
+since the first session, because the total rises as coaching finds new patterns
+whatever the speaker does.
+
 `analysis/` is excluded from this project's own repo (see `.gitignore`) —
 it's your personal data, not something to publish alongside the code. That
 also means it isn't backed up anywhere by default; see
 [`analysis/BACKUP.md`](analysis/BACKUP.md) for a 10-minute setup that gives
 it its own private repo and a one-command backup.
+
+## How precise is "B1+"?
+
+A CEFR band is about a year wide, which makes it useless as weekly feedback:
+`scores_history.csv` recorded the same letter for eleven consecutive sessions
+while the numbers underneath moved a great deal. `python -m voxlib.level` cuts
+the band into rungs — B1, B1+, B2.1 … B2 consolidated, C1.1 — and says which
+one the evidence supports, plus exactly what the next one asks for:
+
+```bash
+python -m voxlib.level
+```
+
+Four dimensions, each with explicit thresholds, so the same history always
+yields the same level and a rung can be argued with rather than believed:
+**accuracy** (errors that cost the listener meaning, with the merely-foreign
+ones gated separately above B2.1), **fluency** (fillers and discourse markers),
+**range** (`python -m voxlib.lexis`, lexical variety and novelty measured from
+the archived transcripts) and **interaction** (question-practice criteria, while
+that evidence is still recent). Coherence is left out because nothing here
+measures it, and a dimension scored on impression would reintroduce the drift
+the scale exists to remove.
+
+Two rules keep it honest. A level needs three consecutive qualifying sessions to
+move, so it does not follow session length around; and a session that lost too
+many words to low-confidence recognition counts neither way. The scale is
+calibrated against one speaker's own record — it is a rung on their line, not an
+exam result, and nothing here certifies a CEFR level.
+
+The dashboard draws the same scale as a progress line: a step for the level
+itself, a dot for what each session read on its own, and one panel per dimension
+showing the current value against what the next rung asks for. It calls
+`voxlib.level` directly rather than reading `level_history.csv`, so the page can
+never disagree with the command line — and the range dimension stays blank until
+`python -m voxlib.lexis --write` has been run at least once.
+
+It also reports something the level line alone hides. A rung held steady by
+hysteresis looks like nothing happening, so the page says separately how far the
+*floor* has risen: the worst single-session reading, when it was last that low,
+and how many sessions have passed without falling back to it.
 
 ## Drills
 

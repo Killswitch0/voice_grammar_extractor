@@ -80,6 +80,35 @@ output/                 all overwritten on every run:
   transcript_annotated.txt  timestamps, source file, [?] markers — for reading by eye
   lines.json                the same lines with per-line confidence/timing — analyze from this
   fluency.json              this run's fluency measurement
+  dashboard.html            every history in analysis/ as one page. It draws the level
+                              line by calling voxlib.level directly, never by reading
+                              level_history.csv, so the page and `python -m voxlib.level`
+                              cannot disagree — which also means the range dimension is
+                              blank until `python -m voxlib.lexis --write` has been run.
+                              It opens with a "Do this next" list — the crossing of which rung a pattern
+                              fails on, its impact ranking and what the spaced-repetition
+                              schedule says is late — then the mistake rate over
+                              time, a category-by-session heatmap, one card per tracked
+                              mistake ranked by impact — one expandable row each, the
+                              collapsed row carrying the three-rung diagnosis (drills.csv
+                              = knows the form, practice_history.csv = produces it when
+                              attending, mistakes.csv = produces it unmonitored) and the
+                              open row its trend, worked examples and notes; a "What's
+                              working" block that only ever lists measurements that moved
+                              the right way; the speech panel
+                              (pace grouped by speech_time_basis and never joined across it,
+                              filler and discourse-marker rates, pauses) with a per-session
+                              reliability table, Question Practice Mode's own scores
+                              (scenario criteria, which criteria keep failing, the warm-up
+                              blocks' offered-vs-attempted counts, asking_memory.md's
+                              patterns) and a timeline of every dated thing, linking each
+                              recording to its report under analysis/sessions/. Built on
+                              demand with
+                              `python -m voxlib.dashboard --open`, NOT by a pipeline run, so
+                              rebuild it after a session to see that session in it. It only
+                              ever reads analysis/; it computes no metric of its own, every
+                              number on it comes from the module that owns the file it came
+                              from (voxlib/dashboard.py says why that rule matters)
 analysis/
   memory.md              the persistent, cross-session tracker — read/update every session
   memory_archive.md      long-resolved mistakes, moved out of memory.md to keep it short
@@ -90,6 +119,23 @@ analysis/
                            session's reliable-word count as the denominator. The machine-
                            readable spine of memory.md's "Persistent Grammar Mistakes" —
                            read the trend with `python -m voxlib.mistakes`
+  lexis_history.csv      REWRITTEN, not appended, by `python -m voxlib.lexis --write`:
+                           lexical variety (MATTR) and words new against a rolling
+                           three-session baseline, per session. Derived wholly from the
+                           archived annotated transcripts, so it can always be recomputed
+                           and there is no judgment in it to preserve. The CEFR "range"
+                           dimension, which nothing else here measures
+  level_history.csv      REWRITTEN, not appended, by `python -m voxlib.level --write`: the
+                           sub-band level per session (B1 / B1+ / B2.1 ... ), each rung
+                           earned against explicit thresholds on four dimensions —
+                           accuracy (clarity tier, gated above B2.1 by the polish tier),
+                           fluency (fillers, discourse markers), range (lexis_history) and
+                           interaction (asking_scenarios, while under 30 days old).
+                           Coherence is deliberately absent: nothing measures it. Read it
+                           with `python -m voxlib.level`, which also prints what the next
+                           rung needs. Every row carries the calibration that produced it;
+                           moving a threshold means bumping `level.CALIBRATION` and
+                           rewriting the file, because the rows are derived, not observed
   fluency_history.csv    append-only, written by the PIPELINE, never by hand: filler rate,
                            words per minute, pause stats per run (see voxlib/fluency.py).
                            Don't edit it.
@@ -161,3 +207,5 @@ session reassesses something differently.
 | `drills.csv` / `drill_items.csv` | `python -m voxlib.practice end` | drill attempts and per-item results — the only scores with a known denominator |
 | `practice_history.csv` | `python -m voxlib.practice end` | typed practice: words produced, errors, corrected repetitions |
 | `asking_scenarios.csv` | `python -m voxlib.practice end --scenario` | question-practice scenarios and the criteria they met |
+| `lexis_history.csv` | `python -m voxlib.lexis --write` | lexical variety and novelty, recomputed from the archive |
+| `level_history.csv` | `python -m voxlib.level --write` | the sub-band level, earned against thresholds — recomputed, never hand-edited |

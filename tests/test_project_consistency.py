@@ -222,6 +222,7 @@ def test_the_personal_data_files_are_all_gitignored():
     ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
 
     for name in ("memory.md", "mistakes.csv", "scores_history.csv", "fluency_history.csv",
+                 "lexis_history.csv", "level_history.csv",
                  "drills.csv", "drill_items.csv", "practice_history.csv",
                  "conversation_focus_log.md", "asking_memory.md", "asking_archive.md",
                  "asking_drills.csv", "asking_drill_items.csv", "asking_pending.json",

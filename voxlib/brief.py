@@ -157,6 +157,32 @@ def parse_memory(path: Path) -> Memory:
                   vocabulary=vocabulary)
 
 
+def persistent_notes(path: Path) -> dict[str, str]:
+    """Each `## <Mistake Name>` block under `# Persistent Grammar Mistakes`, as prose.
+
+    `parse_memory` returns the headings, which is all a brief needs. This returns
+    the bodies under them — the example sentences, the rule, the note on what to
+    do instead — for a reader that wants to see *why* a category is being tracked
+    next to the numbers for it.
+
+    Top-level-section scoped for the same reason `_section` is: `# Improvements`
+    carries `##` entries of the same shape, and a resolved mistake's prose must
+    not come back as a current one's.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+
+    section = _section(text, "Persistent Grammar Mistakes")
+    notes: dict[str, str] = {}
+    matches = list(re.finditer(r"^##\s+(.+?)\s*$", section, flags=re.M))
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(section)
+        notes[match.group(1).strip()] = section[match.end():end].strip()
+    return notes
+
+
 # --- choosing the focus (P15) -------------------------------------------------
 
 @dataclass

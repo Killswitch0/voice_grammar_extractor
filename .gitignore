@@ -14,6 +14,8 @@ analysis/memory.md
 analysis/memory_archive.md
 analysis/scores_history.csv
 analysis/fluency_history.csv
+analysis/lexis_history.csv
+analysis/level_history.csv
 analysis/mistakes.csv
 analysis/drills.csv
 analysis/drill_items.csv
