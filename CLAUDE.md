@@ -85,6 +85,12 @@ output/                 all overwritten on every run:
                               level_history.csv, so the page and `python -m voxlib.level`
                               cannot disagree — which also means the range dimension is
                               blank until `python -m voxlib.lexis --write` has been run.
+                              The trend chart plots the clarity tier against the polish
+                              tier rather than one total, because a total is dominated by
+                              whichever category is most frequent and that can be one a
+                              listener understands instantly. Under it is the current
+                              verdict from `python -m voxlib.exposure` on whether dividing
+                              by reliable words is comparing like with like at all.
                               It opens with a "Do this next" list — the crossing of which rung a pattern
                               fails on, its impact ranking and what the spaced-repetition
                               schedule says is late — then the mistake rate over
@@ -119,6 +125,15 @@ analysis/
                            session's reliable-word count as the denominator. The machine-
                            readable spine of memory.md's "Persistent Grammar Mistakes" —
                            read the trend with `python -m voxlib.mistakes`
+  vocab_history.csv      REWRITTEN, not appended, by `python -m voxlib.vocab --write`: how
+                           often each phrase in memory.md's "Vocabulary To Replace" table —
+                           and each of its suggested replacements — was actually said, per
+                           session, counted on word boundaries over the reliable lines of
+                           the archived transcripts. The table was a standing instruction
+                           with no feedback loop until this existed. Read it with
+                           `python -m voxlib.vocab`; a phrase said fewer than
+                           `vocab.MIN_FOR_MOVEMENT` times in the whole archive is reported
+                           as having no direction rather than as rising
   lexis_history.csv      REWRITTEN, not appended, by `python -m voxlib.lexis --write`:
                            lexical variety (MATTR) and words new against a rolling
                            three-session baseline, per session. Derived wholly from the
@@ -208,4 +223,5 @@ session reassesses something differently.
 | `practice_history.csv` | `python -m voxlib.practice end` | typed practice: words produced, errors, corrected repetitions |
 | `asking_scenarios.csv` | `python -m voxlib.practice end --scenario` | question-practice scenarios and the criteria they met |
 | `lexis_history.csv` | `python -m voxlib.lexis --write` | lexical variety and novelty, recomputed from the archive |
+| `vocab_history.csv` | `python -m voxlib.vocab --write` | whether the retired phrases are actually going away — recomputed from the archive |
 | `level_history.csv` | `python -m voxlib.level --write` | the sub-band level, earned against thresholds — recomputed, never hand-edited |

@@ -495,6 +495,61 @@ also means it isn't backed up anywhere by default; see
 [`analysis/BACKUP.md`](analysis/BACKUP.md) for a 10-minute setup that gives
 it its own private repo and a one-command backup.
 
+## Is the per-1,000 rate comparing like with like?
+
+Every figure this project tracks is a rate per 1,000 reliable words, which is
+only the right move if what is counted actually rises with words. That is
+testable:
+
+```bash
+python -m voxlib.exposure
+```
+
+It asks three questions of the recorded history — do instances within one
+category rise with words spoken, does the session total track words or the
+number of categories being looked for, and does the resulting rate fall as
+sessions get longer. If counts do not scale with words, dividing by them does
+not remove a length effect; it adds one, and the shortest session becomes the
+worst.
+
+It changes no metric and writes no history. The normalization is embedded in the
+trackers, the level scale and every chart, and what to do about the answer is a
+decision rather than a calculation. The dashboard prints the current verdict
+under the trend chart. Re-run it as sessions accumulate: early on, the spread of
+session lengths is narrow enough that a real relationship could hide in it.
+
+## Are the trends real?
+
+Most of what `mistakes.csv` records is a handful of events in a couple of
+thousand words, and a difference of one or two instances is what a random
+process produces on its own. Every rate therefore travels with the count behind
+it, and a direction is only reported as improving or worsening when a two-sample
+Poisson test over the recent window can tell it from chance — otherwise it reads
+"not separable yet", which is a statement about the evidence rather than about
+the speaker. In the heatmap, a cell resting on two instances or fewer is drawn
+fainter for the same reason.
+
+The same restraint applies to the ranking. Impact is severity times the square
+root of the recency-weighted rate, and severity is a judgment — so a serious
+category seen three times in one session can outrank one observed steadily for
+months. That is not wrong, but the CLI marks such rankings with `?`, and the
+workflow will not nominate one of them when it suggests writing a drill. A
+"stalled" flag is likewise only raised where there were enough instances that an
+improvement could have shown.
+
+This is deliberately conservative. On a short history almost nothing clears the
+bar, and the page says so instead of colouring in a verdict.
+
+## Are the retired words actually going?
+
+`memory.md` carries a table of phrases to stop using and what to say instead.
+`python -m voxlib.vocab` counts both sides of every row across the archived
+transcripts, on word boundaries and over reliable lines only, so "cool" never
+collects "cooling". The dashboard shows it worst-first: which phrases are still
+rising, which are not budging, and which replacement actually arrived — because
+a retired phrase falling is only half the question, and the other half is
+whether a new crutch took its place.
+
 ## How precise is "B1+"?
 
 A CEFR band is about a year wide, which makes it useless as weekly feedback:

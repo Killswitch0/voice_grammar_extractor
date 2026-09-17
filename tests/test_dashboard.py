@@ -1140,8 +1140,10 @@ def test_the_direction_counts_cover_every_tracked_pattern(tmp_path: Path):
 
     assert headline["tracked"] == 4 == len(model["categories"])
     assert sum(headline["directions"].values()) == headline["tracked"]
-    assert headline["directions"]["improving"] >= 1
-    assert headline["directions"]["worsening"] >= 1
+    # Three sessions is not enough evidence to call any of these directions, so
+    # the movement is reported as unreadable rather than as improvement.
+    assert headline["directions"]["not separable yet"] == 2
+    assert headline["separable"] == 0
 
 
 # --- the level line -----------------------------------------------------------
@@ -1232,3 +1234,117 @@ def _write_level_history(directory: Path, sessions: list[tuple]) -> None:
         lex.append(f"{date},500,200,0.40,50,100.0,{index},40,80.0,"
                    f"{min(index, lexis.RECENT_BASELINE_SESSIONS)}")
     (directory / "lexis_history.csv").write_text("\n".join(lex) + "\n", encoding="utf-8")
+
+
+def test_a_direction_is_not_claimed_from_a_couple_of_instances(tmp_path: Path):
+    """
+    The correction this section needed most. Most observations in a session are
+    one or two instances, and a rate built on them moves a long way on nothing:
+    reported as improving or worsening, every category gets a coloured verdict
+    on what is really a coin flip, and the page then carries those verdicts into
+    its rankings and its encouragement.
+    """
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    # A category that drifts by one instance a session, and one that changes by
+    # an order of magnitude on counts large enough to mean it.
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 2000, [("Drifter", 3, 0), ("Mover", 3, 30)]),
+        ("2026-08-02", 2000, [("Drifter", 3, 0), ("Mover", 3, 28)]),
+        ("2026-08-03", 2000, [("Drifter", 3, 1), ("Mover", 3, 31)]),
+        ("2026-08-04", 2000, [("Drifter", 3, 1), ("Mover", 3, 2)]),
+        ("2026-08-05", 2000, [("Drifter", 3, 2), ("Mover", 3, 1)]),
+        ("2026-08-06", 2000, [("Drifter", 3, 3), ("Mover", 3, 2)]),
+    ])
+
+    cards = {c["category"]: c for c in
+             dashboard.build_model(analysis_dir=directory)["categories"]}
+
+    assert cards["Mover"]["separable"] is True
+    assert cards["Mover"]["direction"] == "improving"
+    assert cards["Drifter"]["separable"] is False
+    assert cards["Drifter"]["direction"] == "not separable yet"
+    # The shape of the move is still recorded — it is the claim that is withheld.
+    assert cards["Drifter"]["direction_shape"] == "worsening"
+
+
+def test_the_count_travels_with_the_rate(tmp_path: Path):
+    """A rate on its own cannot say whether it rests on one instance or twenty,
+    and those are not the same evidence."""
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 2000, [("A mistake", 3, 1)]),
+        # Untested later: the count must follow the rate to the same session.
+        ("2026-08-02", 2000, [("A mistake", 3, None)]),
+    ])
+
+    card = dashboard.build_model(analysis_dir=directory)["categories"][0]
+
+    assert card["latest_rate"] == 0.5
+    assert card["latest_count"] == 1
+
+
+def test_the_trend_is_split_by_what_an_error_costs(tmp_path: Path):
+    """
+    The split the total hides. A page that plots only the total reports whichever
+    category is most frequent, and that can be one a listener understands
+    instantly — so the line climbs while the errors that actually cost
+    comprehension are falling.
+    """
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 1000, [("Serious", 4, 6), ("Cosmetic", 2, 1)]),
+        ("2026-08-02", 1000, [("Serious", 4, 2), ("Cosmetic", 2, 20)]),
+    ])
+
+    sessions = dashboard.build_model(analysis_dir=directory)["sessions"]
+
+    assert sessions[0]["clarity_rate"] == 6.0 and sessions[0]["polish_rate"] == 1.0
+    assert sessions[1]["clarity_rate"] == 2.0 and sessions[1]["polish_rate"] == 20.0
+    # The total moves the opposite way from the half that matters.
+    assert sessions[1]["rate"] > sessions[0]["rate"]
+    assert sessions[1]["clarity_rate"] < sessions[0]["clarity_rate"]
+    assert sessions[0]["clarity_count"] == 6
+
+
+def test_the_drill_suggestion_skips_a_category_nobody_has_seen(tmp_path: Path):
+    """
+    Impact will happily nominate a serious category observed three times in one
+    session. A drill written from that is a guess about a rare event, and it
+    costs the one focus slot a speaker has.
+    """
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 1000, [("Rare but serious", 5, 3), ("Common enough", 3, 8)]),
+        ("2026-08-02", 1000, [("Rare but serious", 5, 0), ("Common enough", 3, 7)]),
+    ])
+
+    actions = dashboard.build_model(analysis_dir=directory)["actions"]
+    drill_action = next(a for a in actions if a["kind"] == "no-drill")
+
+    assert "Common enough" in drill_action["title"]
+    assert "enough instances on record" in drill_action["detail"]
+
+
+def test_the_page_reports_whether_its_own_denominator_holds(tmp_path: Path):
+    """
+    Every figure on the page divides by reliable words. Whether that is the
+    right divisor is testable, and a dashboard that never asks is asserting its
+    own premise.
+    """
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        (f"2026-08-{d:02d}", words, [("A mistake", 3, count)])
+        for d, (words, count) in enumerate(
+            zip([1000, 1600, 2200, 2800, 3400, 4000], [9, 6, 10, 5, 9, 6]), start=1)
+    ])
+
+    report = dashboard.build_model(analysis_dir=directory)["exposure"]
+
+    assert report["length_effect"] is True
+    assert report["supports_per_word"] is False
+    assert "not removing it" in report["verdict"]
