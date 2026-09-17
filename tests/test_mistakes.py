@@ -319,3 +319,43 @@ def test_the_table_shows_the_tier_and_names_what_has_stopped_moving(tmp_path: Pa
 def test_empty_history_says_so_instead_of_crashing(tmp_path: Path):
     assert mistakes.load(tmp_path / "nothing.csv") == []
     assert "No mistakes recorded yet" in mistakes.format_table([])
+
+
+def test_a_ranking_built_on_a_handful_of_instances_is_marked_as_such(tmp_path: Path):
+    """
+    Impact is severity x sqrt(rate), and severity is a judgment — so a serious
+    category seen three times in one session can outrank one observed steadily
+    for months. That is not wrong, but it must not look like the same kind of
+    number, because the workflow acts on the ranking.
+    """
+    path = tmp_path / "mistakes.csv"
+    _record(path, "2026-08-01", 2000, [("Rare but serious", 5, 3), ("Common", 2, 20)])
+    _record(path, "2026-08-02", 2000, [("Rare but serious", 5, 0), ("Common", 2, 18)])
+
+    by_name = {t.category: t for t in mistakes.summarize(mistakes.load(path))}
+
+    assert by_name["Rare but serious"].evidence == 3
+    assert by_name["Rare but serious"].thin is True
+    assert by_name["Common"].evidence == 38
+    assert by_name["Common"].thin is False
+
+
+def test_a_stall_is_not_claimed_where_an_improvement_could_not_have_shown(tmp_path: Path):
+    """
+    The flag says "this has been drilled and the drill isn't working, change the
+    approach". On one or two instances a session, an improvement of the size the
+    window looks for could not have been seen — so the flag would be asking the
+    owner to abandon something that may well be working.
+    """
+    path = tmp_path / "mistakes.csv"
+    for date, count in [("2026-08-01", 1), ("2026-08-02", 1), ("2026-08-03", 1)]:
+        _record(path, date, 2000, [("Barely seen", 3, count)])
+    by_name = {t.category: t for t in mistakes.summarize(mistakes.load(path))}
+    assert by_name["Barely seen"].stalled is False
+
+    # The same shape, with enough instances for the claim to mean something.
+    busy = tmp_path / "busy.csv"
+    for date in ("2026-08-01", "2026-08-02", "2026-08-03"):
+        _record(busy, date, 2000, [("Often seen", 3, 9)])
+
+    assert mistakes.summarize(mistakes.load(busy))[0].stalled is True

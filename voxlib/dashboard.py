@@ -57,7 +57,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from . import asking, brief, drill, fluency, focus_log, level, mistakes, practice, vocab
+from . import (asking, brief, drill, exposure, fluency, focus_log, level, mistakes,
+               practice, vocab)
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +271,14 @@ def _sessions(rows: list[mistakes.SessionRow],
         measured = [r for r in day if r.occurrences is not None]
         occurrences = sum(r.occurrences or 0 for r in day)
         cohort_occurrences = sum(r.occurrences or 0 for r in day if r.category in cohort)
+        # The split that decides what to work on, and the one the total hides: a
+        # clarity-tier error costs the listener the meaning, a polish-tier one
+        # only sounds foreign. A total dominated by a low-severity category can
+        # climb steeply while the part that impedes comprehension falls.
+        clarity = sum(r.occurrences or 0 for r in day
+                      if r.severity >= mistakes.CLARITY_SEVERITY)
+        polish = sum(r.occurrences or 0 for r in day
+                     if r.severity < mistakes.CLARITY_SEVERITY)
         recording = recordings.get(date)
 
         def rate(count: int) -> Optional[float]:
@@ -284,6 +293,10 @@ def _sessions(rows: list[mistakes.SessionRow],
             "occurrences": occurrences,
             "rate": rate(occurrences),
             "cohort_rate": rate(cohort_occurrences),
+            "clarity_rate": rate(clarity),
+            "polish_rate": rate(polish),
+            "clarity_count": clarity,
+            "polish_count": polish,
             # Transcript quality, not speech quality. Kept beside the rates
             # because a session where much of the transcript was unreliable is a
             # weaker measurement of everything above, and never mixed into them.
@@ -292,6 +305,23 @@ def _sessions(rows: list[mistakes.SessionRow],
             "speech_minutes": recording.speech_minutes if recording else None,
         })
     return sessions
+
+
+def _exposure(mistake_rows: list[mistakes.SessionRow]) -> dict:
+    """Whether dividing by words is comparing like with like — see exposure.py."""
+    report = exposure.analyse(mistake_rows)
+    if report is None:
+        return {}
+    return {
+        "verdict": report.verdict,
+        "supports_per_word": report.supports_per_word,
+        "length_effect": report.length_effect,
+        "within_category": report.mean_within_category,
+        "rate_vs_words": report.rate_vs_words,
+        "total_vs_categories": report.total_vs_categories,
+        "spread": report.spread,
+        "narrow": report.spread < 2,
+    }
 
 
 def _delta_drivers(sessions: list[dict], categories: list[dict]) -> list[dict]:
@@ -383,6 +413,11 @@ def _headline(sessions: list[dict], scores: list[dict],
         "drivers": _delta_drivers(sessions, categories),
         "directions": directions,
         "separable": separable,
+        # Named, because "1 of 19" under a neutral label reads like a score when
+        # the one may be a category getting worse.
+        "separable_names": ", ".join(
+            f"{c['category']} {c['direction']}" for c in categories if c["separable"]),
+        "clarity_rate": sessions[-1]["clarity_rate"] if sessions else None,
         "tracked": len(categories),
         # How long the page has been describing the same evidence, and whether
         # there is a recording sitting in fluency_history.csv that no analysis
@@ -511,6 +546,8 @@ def _categories(rows: list[mistakes.SessionRow], dates: list[str],
             "direction_shape": trend.direction,
             "separable": trend.separable,
             "latest_count": trend.latest_count,
+            "evidence": trend.evidence,
+            "thin": trend.thin,
             "stalled": trend.stalled,
             "absence_streak": trend.absence_streak,
             "untested_since": trend.untested_since,
@@ -1073,6 +1110,8 @@ def _ladder(cards: list[dict], drill_stats: dict[str, dict],
             # Rung 3 — produces it unmonitored.
             "speech_rate": card["latest_rate"],
             "speech_count": card["latest_count"],
+            "evidence": card["evidence"],
+            "thin": card["thin"],
             "speech_weighted": card["weighted_rate"],
             "direction": card["direction"],
             "separable": card["separable"],
@@ -1330,13 +1369,24 @@ def _next_actions(ladder: dict, asking_model: dict, speech: dict,
     #    highest-impact one is the cheapest thing to learn something about.
     no_drill = [r for r in rows if r["state"] == "no-drill"]
     if no_drill:
-        first = no_drill[0]
+        # The highest-impact one that has actually been seen enough times to be
+        # worth building a drill around. Impact alone will happily nominate a
+        # category observed three times in one session, and a drill written for
+        # that is a guess about a rare event.
+        solid = [r for r in no_drill if not r["thin"]]
+        first = (solid or no_drill)[0]
+        detail = (f"{len(no_drill)} of {len(rows)} tracked mistakes have none, and this is "
+                  f"the highest-impact one with enough instances on record to build from "
+                  f"\u2014 impact {first['impact']}, seen {first['evidence']} times")
+        if not solid:
+            detail = (f"{len(no_drill)} of {len(rows)} tracked mistakes have none. Every one "
+                      f"of them rests on fewer than {mistakes.MIN_EVIDENCE} instances, so "
+                      f"this is the pick by impact rather than by evidence \u2014 impact "
+                      f"{first['impact']}, seen {first['evidence']} times")
         actions.append({
             "kind": "no-drill",
             "title": f"Write a drill for {first['category']}",
-            "detail": (f"{len(no_drill)} of {len(rows)} tracked mistakes have none, and this "
-                       f"is the highest-impact one \u2014 impact {first['impact']}, "
-                       f"{first['speech_rate']} per 1,000 words"),
+            "detail": detail,
             "anchor": "patterns",
         })
 
@@ -1413,6 +1463,7 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
         "dates": dates,
         "sessions": sessions,
         "cohort": sorted(cohort),
+        "exposure": _exposure(mistake_rows),
         "categories": categories,
         "scores": scores,
         "ladder": ladder,
@@ -2354,20 +2405,27 @@ document.getElementById("meta").textContent =
 
   host.append(el("div", { class: "hero-row" }, [
     el("div", {}, [
-      el("div", { class: "hero-val", text: num(H.rate) }),
-      el("div", { class: "hero-label",
-        text: `tracked mistakes per 1,000 reliable words \\u00b7 ${H.rate_date}` }),
+      // The level leads. It is the answer to "how is my English going"; the
+      // mistake rate is a diagnostic, and the one most easily misread — it is
+      // driven by whichever category is most frequent, whatever that costs.
+      el("div", { class: "hero-val",
+                  text: (MODEL.level.current || {}).label || H.cefr || "\\u2014" }),
+      el("div", { class: "hero-label", text: MODEL.level.target
+        ? `spoken level \\u00b7 next rung is ${MODEL.level.target.label}`
+        : "spoken level" }),
+      el("div", { class: "driver" }, [
+        el("b", { text: num(H.rate) }),
+        el("span", { text: ` tracked mistakes per 1,000 reliable words on ${H.rate_date}` }),
+      ]),
       deltaNode,
       driverNode,
     ]),
     el("div", { class: "tiles" }, [
       el("div", {}, [
-        el("div", { class: "tile-label", text: "Level" }),
-        el("div", { class: "tile-val",
-          text: (MODEL.level.current || {}).label || H.cefr || "\\u2014" }),
-        el("div", { class: "tile-note", text: MODEL.level.target
-          ? `next is ${MODEL.level.target.label}`
-          : `${H.cefr} in scores_history.csv` }),
+        el("div", { class: "tile-label", text: "Clarity-tier rate" }),
+        el("div", { class: "tile-val", text: num(H.clarity_rate) }),
+        el("div", { class: "tile-note",
+          text: "per 1,000 words \\u2014 the errors that cost the listener" }),
       ]),
       el("div", {}, [
         el("div", { class: "tile-label", text: "Recordings analysed" }),
@@ -2378,9 +2436,10 @@ document.getElementById("meta").textContent =
       // ever go up and they prompt nothing; the denominator they described is
       // in the reliability table, next to the share of it that survived.
       el("div", {}, [
-        el("div", { class: "tile-label", text: "Measurable trends" }),
+        el("div", { class: "tile-label", text: "Trends above noise" }),
         el("div", { class: "tile-val", text: `${H.separable} of ${H.tracked}` }),
-        el("div", { class: "tile-note", text: tail }),
+        el("div", { class: "tile-note", text: H.separable_names
+          ? `${H.separable_names} — ${tail}` : tail }),
       ]),
       el("div", {}, [
         el("div", { class: "tile-label", text: "Last analysed" }),
@@ -2397,7 +2456,8 @@ document.getElementById("meta").textContent =
     `Self-assessed scores have not moved: ${scoreNotes.join(", ")} `
     + `${scoreNotes.length === 1 ? "has" : "have"} taken one value across all `
     + `${H.sessions} sessions. They are a coarse 0\\u201310 judgment and change on a scale of `
-    + `months \\u2014 the mistake rate above is the number that actually moves, so it leads here.` }));
+    + "months, which is why the level above is earned against measured thresholds instead "
+    + "of being asserted." }));
 })();
 
 /* do this next */
@@ -2432,10 +2492,15 @@ document.getElementById("meta").textContent =
 /* trend */
 (() => {
   const host = document.getElementById("trend");
+  // Clarity against polish, not one total. The total is dominated by whichever
+  // category happens to be most frequent, and that can be a severity-2 one; the
+  // clarity tier is the part that costs the listener the meaning, and it is
+  // what decides whether the speaker is getting easier to understand.
   const series = [
-    { key: "rate", token: "--series-1", label: "all tracked categories" },
-    { key: "cohort_rate", token: "--series-2",
-      label: `the ${H.cohort_size} tracked since day one` },
+    { key: "clarity_rate", token: "--series-2",
+      label: "clarity tier — costs the listener the meaning" },
+    { key: "polish_rate", token: "--series-1",
+      label: "polish tier — understood, just not native" },
   ];
   const words = MODEL.sessions.map((s) => s.reliable_words).filter(Boolean);
   const plot = el("div", { class: "plot" });
@@ -2446,10 +2511,11 @@ document.getElementById("meta").textContent =
     el("div", {}, [
       el("h2", { text: "Mistake rate over time" }),
       el("div", { class: "sub", text:
-        "Occurrences per 1,000 reliable words. The two lines differ because the number of "
-        + "tracked categories grows as coaching finds new patterns \\u2014 the orange line counts "
-        + "the same categories at both ends, so it is the one comparable across the whole "
-        + "history." }),
+        "Occurrences per 1,000 reliable words, split by what an error costs. Read the "
+        + "orange line first: those are the errors that cost a listener the meaning, and "
+        + "they are the ones worth spending a focus slot on. A total on its own is "
+        + "dominated by whichever category is most frequent, which can be one that is "
+        + "understood instantly." }),
     ]),
     toggle,
   ]));
@@ -2499,14 +2565,29 @@ document.getElementById("meta").textContent =
       return el("div", { class: "strip-wrap" }, [strip]);
     })(),
   ]));
+  const E = MODEL.exposure || {};
   host.append(el("div", { class: "note", text:
-    `Sessions range from ${int(Math.min(...words))} to ${int(Math.max(...words))} reliable words. `
-    + "The rate already divides by that, but a short session measures it less precisely, and a "
-    + "session with many low-confidence lines is a weaker measurement of everything above." }));
+    `Sessions range from ${int(Math.min(...words))} to ${int(Math.max(...words))} reliable `
+    + "words, and every figure here divides by that. Whether it should is testable, and the "
+    + `answer on this history is: ${E.verdict || "not enough sessions to tell yet"}.`
+    + (E.within_category !== null && E.within_category !== undefined
+       ? ` Within a category, instances against words spoken correlate ${num(E.within_category)};`
+         + ` the rate against words spoken, ${num(E.rate_vs_words)}.` : "")
+    + (E.total_vs_categories !== null && E.total_vs_categories !== undefined
+       ? ` The session total tracks the number of categories being looked for`
+         + ` (${num(E.total_vs_categories)}) more closely than it tracks anything said,`
+         + " so the all-categories total is partly a measure of attention; the table view"
+         + " keeps the day-one cohort, which counts the same categories at both ends."
+       : "")
+    + (E.narrow ? ` Session lengths span only ${E.spread}× so far, narrow enough to hide a`
+                  + " real relationship — python -m voxlib.exposure re-runs this as more"
+                  + " sessions accumulate." : "") }));
   host.append(table);
 
   responsive(plot, (w) => lineChart(w, MODEL.sessions, series, {
     extraRows: (d) => [
+      { value: num(d.rate), name: "both tiers together" },
+      { value: `${d.clarity_count} + ${d.polish_count}`, name: "instances, clarity + polish" },
       { value: int(d.reliable_words), name: "reliable words" },
       { value: String(d.categories_tracked), name: "categories tracked" },
     ],
@@ -2521,7 +2602,8 @@ document.getElementById("meta").textContent =
       table.dataset.built = "1";
       const t = el("table");
       t.append(el("thead", {}, [el("tr", {}, [
-        el("th", { text: "Session" }), el("th", { text: "All tracked" }),
+        el("th", { text: "Session" }), el("th", { text: "Clarity" }),
+        el("th", { text: "Polish" }), el("th", { text: "All tracked" }),
         el("th", { text: "Day-one categories" }), el("th", { text: "Occurrences" }),
         el("th", { text: "Reliable words" }), el("th", { text: "Categories" }),
         el("th", { text: "Low-confidence lines" }),
@@ -2529,6 +2611,8 @@ document.getElementById("meta").textContent =
       const body = el("tbody");
       for (const s of MODEL.sessions) body.append(el("tr", {}, [
         el("th", { scope: "row", text: s.date }),
+        el("td", { text: `${num(s.clarity_rate)} (${s.clarity_count})` }),
+        el("td", { text: `${num(s.polish_rate)} (${s.polish_count})` }),
         el("td", { text: num(s.rate) }), el("td", { text: num(s.cohort_rate) }),
         el("td", { text: String(s.occurrences) }), el("td", { text: int(s.reliable_words) }),
         el("td", { text: `${s.categories_measured}/${s.categories_tracked} measured` }),

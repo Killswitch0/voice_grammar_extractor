@@ -85,6 +85,12 @@ output/                 all overwritten on every run:
                               level_history.csv, so the page and `python -m voxlib.level`
                               cannot disagree — which also means the range dimension is
                               blank until `python -m voxlib.lexis --write` has been run.
+                              The trend chart plots the clarity tier against the polish
+                              tier rather than one total, because a total is dominated by
+                              whichever category is most frequent and that can be one a
+                              listener understands instantly. Under it is the current
+                              verdict from `python -m voxlib.exposure` on whether dividing
+                              by reliable words is comparing like with like at all.
                               It opens with a "Do this next" list — the crossing of which rung a pattern
                               fails on, its impact ranking and what the spaced-repetition
                               schedule says is late — then the mistake rate over

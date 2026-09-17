@@ -1283,3 +1283,68 @@ def test_the_count_travels_with_the_rate(tmp_path: Path):
 
     assert card["latest_rate"] == 0.5
     assert card["latest_count"] == 1
+
+
+def test_the_trend_is_split_by_what_an_error_costs(tmp_path: Path):
+    """
+    The split the total hides. A page that plots only the total reports whichever
+    category is most frequent, and that can be one a listener understands
+    instantly — so the line climbs while the errors that actually cost
+    comprehension are falling.
+    """
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 1000, [("Serious", 4, 6), ("Cosmetic", 2, 1)]),
+        ("2026-08-02", 1000, [("Serious", 4, 2), ("Cosmetic", 2, 20)]),
+    ])
+
+    sessions = dashboard.build_model(analysis_dir=directory)["sessions"]
+
+    assert sessions[0]["clarity_rate"] == 6.0 and sessions[0]["polish_rate"] == 1.0
+    assert sessions[1]["clarity_rate"] == 2.0 and sessions[1]["polish_rate"] == 20.0
+    # The total moves the opposite way from the half that matters.
+    assert sessions[1]["rate"] > sessions[0]["rate"]
+    assert sessions[1]["clarity_rate"] < sessions[0]["clarity_rate"]
+    assert sessions[0]["clarity_count"] == 6
+
+
+def test_the_drill_suggestion_skips_a_category_nobody_has_seen(tmp_path: Path):
+    """
+    Impact will happily nominate a serious category observed three times in one
+    session. A drill written from that is a guess about a rare event, and it
+    costs the one focus slot a speaker has.
+    """
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 1000, [("Rare but serious", 5, 3), ("Common enough", 3, 8)]),
+        ("2026-08-02", 1000, [("Rare but serious", 5, 0), ("Common enough", 3, 7)]),
+    ])
+
+    actions = dashboard.build_model(analysis_dir=directory)["actions"]
+    drill_action = next(a for a in actions if a["kind"] == "no-drill")
+
+    assert "Common enough" in drill_action["title"]
+    assert "enough instances on record" in drill_action["detail"]
+
+
+def test_the_page_reports_whether_its_own_denominator_holds(tmp_path: Path):
+    """
+    Every figure on the page divides by reliable words. Whether that is the
+    right divisor is testable, and a dashboard that never asks is asserting its
+    own premise.
+    """
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        (f"2026-08-{d:02d}", words, [("A mistake", 3, count)])
+        for d, (words, count) in enumerate(
+            zip([1000, 1600, 2200, 2800, 3400, 4000], [9, 6, 10, 5, 9, 6]), start=1)
+    ])
+
+    report = dashboard.build_model(analysis_dir=directory)["exposure"]
+
+    assert report["length_effect"] is True
+    assert report["supports_per_word"] is False
+    assert "not removing it" in report["verdict"]

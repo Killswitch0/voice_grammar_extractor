@@ -110,6 +110,20 @@ STALL_IMPROVEMENT = 0.25
 # it moved further than chance would move it anyway.
 SEPARABILITY_Z = 1.96
 
+# How many instances a category needs on record before its ranking is treated as
+# resting on something. Impact is severity x sqrt(rate), and severity is a
+# judgment: a high severity multiplied by a rate computed from a single session
+# can outrank a category observed many times over months. That is not a fault in
+# the formula — a rare serious error should rank — but it is a reason to say out
+# loud which rankings rest on a handful of instances, and to stop the workflow
+# acting on one as though it were established.
+MIN_EVIDENCE = 5
+
+# And how many instances have to be in the stall window before "no better than
+# it was" is a claim rather than an absence of one. Below this, an improvement
+# of the size the window looks for could not have been seen even if it happened.
+MIN_STALL_EVIDENCE = 5
+
 
 @dataclass
 class MistakeCount:
@@ -158,6 +172,12 @@ class CategoryTrend:
     # Whether the change `direction` describes stands out from counting noise.
     separable: bool = False
     latest_count: Optional[int] = None   # the numerator behind `latest_rate`
+    evidence: int = 0                    # instances on record, all sessions
+
+    @property
+    def thin(self) -> bool:
+        """Whether this category's ranking rests on too little to act on."""
+        return self.evidence < MIN_EVIDENCE
 
     @property
     def reported_direction(self) -> str:
@@ -306,6 +326,12 @@ def _impact(severity: int, weighted_rate: float) -> float:
     return round(severity * math.sqrt(weighted_rate), 2)
 
 
+def _stall_evidence(rows: list["SessionRow"]) -> int:
+    """Instances inside the stall window — how much there was to improve on."""
+    measured = [r for r in rows if r.occurrences is not None]
+    return sum(r.occurrences or 0 for r in measured[-STALL_WINDOW:])
+
+
 def _stalled(measured: list[tuple[str, float]]) -> bool:
     """
     True when a category has been measured across the last STALL_WINDOW sessions
@@ -440,8 +466,13 @@ def summarize(rows: list[SessionRow]) -> list[CategoryTrend]:
             absence_streak=streak,
             untested_since=untested_since,
             direction=_direction(measured),
-            stalled=_stalled(measured),
+            # "No better than it was" needs enough instances in the window that
+            # an improvement would have shown. On one or two a session, the flag
+            # fires on noise and asks the owner to change a working approach.
+            stalled=(_stalled(measured)
+                     and _stall_evidence(category_rows) >= MIN_STALL_EVIDENCE),
             separable=_separable(category_rows),
+            evidence=sum(r.occurrences or 0 for r in category_rows),
             # The numerator of `latest_rate`, so the two always describe the
             # same session: the last row may be an untested one.
             latest_count=next((r.occurrences for r in reversed(category_rows)
@@ -468,8 +499,9 @@ def format_table(trends: list[CategoryTrend]) -> str:
         absent = f"{t.absence_streak}" + ("*" if t.ready_for_improvements else "")
         trend = ("~" + t.direction if t.reported_direction == "not separable yet"
                  else t.direction) + ("!" if t.stalled else "")
+        impact = f"{t.impact:.2f}" + ("?" if t.thin else "")
         lines.append(
-            f"{t.category[:42]:<42} {t.severity:>3} {t.tier:>7} {t.impact:>7.2f} "
+            f"{t.category[:42]:<42} {t.severity:>3} {t.tier:>7} {impact:>7} "
             f"{t.weighted_rate:>8.2f} {latest:>11} {trend:>10} {absent:>7}"
         )
 
@@ -486,6 +518,14 @@ def format_table(trends: list[CategoryTrend]) -> str:
             f"! no better than {STALL_WINDOW} measured sessions ago — if one of these is a "
             f"current priority, change the drill, don't restate the goal (rule 18): "
             + ", ".join(stalled)
+        )
+    thin = [t for t in trends if t.thin]
+    if thin:
+        lines.append(
+            f"? ranked on fewer than {MIN_EVIDENCE} instances in total ({len(thin)} of "
+            f"{len(trends)}) — the ranking is a guess about a rare event, not a "
+            f"measurement of a frequent one: " + ", ".join(t.category for t in thin[:4])
+            + (", …" if len(thin) > 4 else "")
         )
     unsure = [t for t in trends if t.reported_direction == "not separable yet"]
     if unsure:
