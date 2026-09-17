@@ -495,6 +495,30 @@ also means it isn't backed up anywhere by default; see
 [`analysis/BACKUP.md`](analysis/BACKUP.md) for a 10-minute setup that gives
 it its own private repo and a one-command backup.
 
+## Are the trends real?
+
+Most of what `mistakes.csv` records is a handful of events in a couple of
+thousand words, and a difference of one or two instances is what a random
+process produces on its own. Every rate therefore travels with the count behind
+it, and a direction is only reported as improving or worsening when a two-sample
+Poisson test over the recent window can tell it from chance — otherwise it reads
+"not separable yet", which is a statement about the evidence rather than about
+the speaker. In the heatmap, a cell resting on two instances or fewer is drawn
+fainter for the same reason.
+
+This is deliberately conservative. On a short history almost nothing clears the
+bar, and the page says so instead of colouring in a verdict.
+
+## Are the retired words actually going?
+
+`memory.md` carries a table of phrases to stop using and what to say instead.
+`python -m voxlib.vocab` counts both sides of every row across the archived
+transcripts, on word boundaries and over reliable lines only, so "cool" never
+collects "cooling". The dashboard shows it worst-first: which phrases are still
+rising, which are not budging, and which replacement actually arrived — because
+a retired phrase falling is only half the question, and the other half is
+whether a new crutch took its place.
+
 ## How precise is "B1+"?
 
 A CEFR band is about a year wide, which makes it useless as weekly feedback:

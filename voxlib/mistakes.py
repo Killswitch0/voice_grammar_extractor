@@ -98,6 +98,18 @@ CLARITY_SEVERITY = 3
 STALL_WINDOW = 3
 STALL_IMPROVEMENT = 0.25
 
+# How far a change has to stand out from chance before it is reported as a
+# trend. Two standard deviations, the ordinary 95% convention.
+#
+# This exists because most of what this file records is a handful of events in a
+# couple of thousand words, and a difference of one or two instances is exactly
+# what a random process produces on its own. Without a test, every category gets
+# an improving or worsening label on that basis, the labels are then read as
+# findings, and the ranking and the session report inherit them. The rate
+# comparison in `_direction` says which way a category moved; this says whether
+# it moved further than chance would move it anyway.
+SEPARABILITY_Z = 1.96
+
 
 @dataclass
 class MistakeCount:
@@ -143,6 +155,22 @@ class CategoryTrend:
     untested_since: int             # sessions since the last measurable one
     direction: str                  # "worsening" / "improving" / "steady" / "n/a"
     stalled: bool                   # drilled across STALL_WINDOW sessions and didn't move
+    # Whether the change `direction` describes stands out from counting noise.
+    separable: bool = False
+    latest_count: Optional[int] = None   # the numerator behind `latest_rate`
+
+    @property
+    def reported_direction(self) -> str:
+        """`direction`, but only when the evidence can carry it.
+
+        "steady" and "n/a" are already claims of no movement, so they pass
+        through. An improving or worsening label is a claim about the speaker,
+        and on counts this small it usually cannot be told from chance — so it
+        says so instead of picking a colour.
+        """
+        if self.direction in ("steady", "n/a") or self.separable:
+            return self.direction
+        return "not separable yet"
 
     @property
     def ready_for_improvements(self) -> bool:
@@ -305,6 +333,42 @@ def _stalled(measured: list[tuple[str, float]]) -> bool:
     return latest > started_at * (1 - STALL_IMPROVEMENT)
 
 
+def _separable(rows: list["SessionRow"]) -> bool:
+    """Whether a category's recent rate really differs from its earlier one.
+
+    A two-sample Poisson rate test: pool the counts and the reliable words over
+    the recent window, pool them over everything before it, and ask how far the
+    split departs from what the two exposures alone would predict. Pooled rather
+    than session-by-session because consecutive sessions are a handful of events
+    each and nothing is ever separable at that scale; pooling is the most
+    forgiving honest test available.
+
+    Counts, not rates. The rate is what the reader compares, but the
+    uncertainty lives in the numerator: two instances in two thousand words and
+    four in two thousand are the same rate apart as four and eight, and not at
+    all the same evidence.
+    """
+    measured = [r for r in rows if r.occurrences is not None and r.reliable_words > 0]
+    if len(measured) <= STALL_WINDOW:
+        return False                      # nothing to compare the window against
+    recent, earlier = measured[-STALL_WINDOW:], measured[:-STALL_WINDOW]
+
+    early_count = sum(r.occurrences or 0 for r in earlier)
+    early_words = sum(r.reliable_words for r in earlier)
+    late_count = sum(r.occurrences or 0 for r in recent)
+    late_words = sum(r.reliable_words for r in recent)
+    total_count, total_words = early_count + late_count, early_words + late_words
+    if not total_count or not total_words:
+        return False
+
+    share = early_words / total_words
+    expected = total_count * share
+    variance = total_count * share * (1 - share)
+    if variance <= 0:
+        return False
+    return abs((early_count - expected) / math.sqrt(variance)) >= SEPARABILITY_Z
+
+
 def _direction(measured: list[tuple[str, float]]) -> str:
     """Latest measured rate against the mean of the ones before it. Needs at
     least two measured sessions to say anything at all."""
@@ -377,6 +441,11 @@ def summarize(rows: list[SessionRow]) -> list[CategoryTrend]:
             untested_since=untested_since,
             direction=_direction(measured),
             stalled=_stalled(measured),
+            separable=_separable(category_rows),
+            # The numerator of `latest_rate`, so the two always describe the
+            # same session: the last row may be an untested one.
+            latest_count=next((r.occurrences for r in reversed(category_rows)
+                               if r.occurrences is not None), None),
         ))
 
     trends.sort(key=lambda t: (-t.impact, t.category))
@@ -389,15 +458,19 @@ def format_table(trends: list[CategoryTrend]) -> str:
         return "No mistakes recorded yet."
 
     header = (f"{'Category':<42} {'Sev':>3} {'Tier':>7} {'Impact':>7} {'Rate/1k':>8} "
-              f"{'Latest':>7} {'Trend':>10} {'Absent':>7}")
+              f"{'Latest':>11} {'Trend':>10} {'Absent':>7}")
     lines = [header, "-" * len(header)]
     for t in trends:
-        latest = "—" if t.latest_rate is None else f"{t.latest_rate:.2f}"
+        # The count beside the rate, because the rate alone hides how thin the
+        # evidence is: one instance and ten read as the same kind of number.
+        latest = "—" if t.latest_rate is None else (
+            f"{t.latest_rate:.2f}" + (f" ({t.latest_count})" if t.latest_count else ""))
         absent = f"{t.absence_streak}" + ("*" if t.ready_for_improvements else "")
-        trend = t.direction + ("!" if t.stalled else "")
+        trend = ("~" + t.direction if t.reported_direction == "not separable yet"
+                 else t.direction) + ("!" if t.stalled else "")
         lines.append(
             f"{t.category[:42]:<42} {t.severity:>3} {t.tier:>7} {t.impact:>7.2f} "
-            f"{t.weighted_rate:>8.2f} {latest:>7} {trend:>10} {absent:>7}"
+            f"{t.weighted_rate:>8.2f} {latest:>11} {trend:>10} {absent:>7}"
         )
 
     promotable = [t.category for t in trends if t.ready_for_improvements]
@@ -413,6 +486,13 @@ def format_table(trends: list[CategoryTrend]) -> str:
             f"! no better than {STALL_WINDOW} measured sessions ago — if one of these is a "
             f"current priority, change the drill, don't restate the goal (rule 18): "
             + ", ".join(stalled)
+        )
+    unsure = [t for t in trends if t.reported_direction == "not separable yet"]
+    if unsure:
+        lines.append(
+            f"~ the direction is the way the rate moved, but on these counts it cannot be "
+            f"told from chance ({len(unsure)} of {len(trends)}). Treat it as the shape of "
+            f"the change, not as evidence of one."
         )
     untested = [t.category for t in trends if t.untested_since and not t.ready_for_improvements]
     if untested:

@@ -57,7 +57,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from . import asking, brief, drill, fluency, focus_log, level, mistakes, practice
+from . import asking, brief, drill, fluency, focus_log, level, mistakes, practice, vocab
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +359,7 @@ def _headline(sessions: list[dict], scores: list[dict],
     directions: dict[str, int] = {}
     for card in categories:
         directions[card["direction"]] = directions.get(card["direction"], 0) + 1
+    separable = sum(1 for card in categories if card["separable"])
     return {
         "rate": latest["rate"] if latest else None,
         "rate_date": latest["date"] if latest else None,
@@ -381,6 +382,7 @@ def _headline(sessions: list[dict], scores: list[dict],
         # What moved the hero number, largest first.
         "drivers": _delta_drivers(sessions, categories),
         "directions": directions,
+        "separable": separable,
         "tracked": len(categories),
         # How long the page has been describing the same evidence, and whether
         # there is a recording sitting in fluency_history.csv that no analysis
@@ -505,7 +507,10 @@ def _categories(rows: list[mistakes.SessionRow], dates: list[str],
             "severity": trend.severity,
             "tier": trend.tier,
             "impact": round(trend.impact, 2),
-            "direction": trend.direction,
+            "direction": trend.reported_direction,
+            "direction_shape": trend.direction,
+            "separable": trend.separable,
+            "latest_count": trend.latest_count,
             "stalled": trend.stalled,
             "absence_streak": trend.absence_streak,
             "untested_since": trend.untested_since,
@@ -824,6 +829,56 @@ def _timeline(sessions: list[dict], speech: list[dict],
     return entries
 
 
+def _vocabulary(analysis_dir: Path) -> dict:
+    """Whether the phrases the coach retired are actually going away.
+
+    Computed from the archive rather than read back from `vocab_history.csv`,
+    for the same reason the level line is: the table in memory.md changes
+    between sessions, and a file written before the last edit describes a
+    different table.
+    """
+    substitutions = vocab.parse_substitutions(analysis_dir / "memory.md")
+    counts = vocab.measure_history(analysis_dir / "sessions", substitutions)
+    if not counts:
+        return {"rows": []}
+
+    trends = {(t.phrase, t.kind): t for t in vocab.summarize(counts)}
+    dates = sorted({c.date for c in counts})
+
+    rows = []
+    for substitution in substitutions:
+        retired = trends.get((substitution.phrase, "retired"))
+        if not retired or not retired.total:
+            continue
+        rows.append({
+            "phrase": substitution.phrase,
+            "movement": retired.movement,
+            "counts": retired.counts,
+            "total": retired.total,
+            "early": retired.early,
+            "late": retired.late,
+            "replacements": [{
+                "phrase": r,
+                "counts": trends[(r, "replacement")].counts,
+                "total": trends[(r, "replacement")].total,
+                "movement": trends[(r, "replacement")].movement,
+            } for r in substitution.replacements
+                if (r, "replacement") in trends and trends[(r, "replacement")].total],
+        })
+    # Worst first: a retired phrase still rising is the one to look at.
+    order = {"rising": 0, "level": 1, "falling": 2, "too few to tell": 3, "never said": 4}
+    rows.sort(key=lambda r: (order.get(r["movement"], 9), -r["total"]))
+
+    return {
+        "rows": rows,
+        "dates": dates,
+        "never_said": [s.phrase for s in substitutions
+                       if not (trends.get((s.phrase, "retired"))
+                               and trends[(s.phrase, "retired")].total)],
+        "tracked": len(substitutions),
+    }
+
+
 def _level(analysis_dir: Path) -> dict:
     """The sub-band level line, recomputed rather than read back.
 
@@ -1017,8 +1072,10 @@ def _ladder(cards: list[dict], drill_stats: dict[str, dict],
             "asking_rate": ask_rates.get(category),
             # Rung 3 — produces it unmonitored.
             "speech_rate": card["latest_rate"],
+            "speech_count": card["latest_count"],
             "speech_weighted": card["weighted_rate"],
             "direction": card["direction"],
+            "separable": card["separable"],
             "stalled": card["stalled"],
             "absence_streak": card["absence_streak"],
             "untested_since": card["untested_since"],
@@ -1119,13 +1176,27 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
             "anchor": "patterns",
         })
 
+    # Only the ones whose improvement is bigger than counting noise. Before this
+    # test the line read "8 of 19 improving" on differences of a single instance,
+    # which is encouragement rather than a measurement.
     improving = [c for c in categories if c["direction"] == "improving"]
     if improving:
         wins.append({
             "kind": "improving",
-            "title": f"{len(improving)} of {len(categories)} patterns are improving",
+            "title": f"{len(improving)} of {len(categories)} patterns are measurably "
+                     "improving",
             "detail": "the biggest by impact: "
                       + ", ".join(c["category"] for c in improving[:3]),
+            "anchor": "patterns",
+        })
+    leaning = [c for c in categories
+               if c["direction_shape"] == "improving" and not c["separable"]]
+    if leaning and not improving:
+        wins.append({
+            "kind": "leaning",
+            "title": f"{len(leaning)} more are pointing the right way",
+            "detail": "not yet far enough from chance to call it, on counts this small: "
+                      + ", ".join(c["category"] for c in leaning[:3]),
             "anchor": "patterns",
         })
 
@@ -1350,6 +1421,7 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
         "actions": _next_actions(ladder, asking_model, speech, headline),
         "working": _whats_working(ladder, categories, speech, asking_model),
         "level": _level(analysis_dir),
+        "vocabulary": _vocabulary(analysis_dir),
         "timeline": _timeline(sessions, speech["sessions"], practice_sessions,
                               scenario_runs, _reports(analysis_dir, out_dir)),
     }
@@ -1614,6 +1686,20 @@ _TEMPLATE = """<!DOCTYPE html>
   .decision { border-left: 2px solid var(--grid); padding-left: 10px; margin-top: 12px; }
   .decision .dt { font-size: 12px; font-weight: 600; color: var(--ink); line-height: 1.45; }
 
+  /* Vocabulary */
+  .vrow { display: grid; grid-template-columns: minmax(130px, 200px) 1fr auto;
+          gap: 14px; align-items: center; padding: 11px 0;
+          border-top: 1px solid var(--border); }
+  .vrow:first-of-type { border-top: none; }
+  .vphrase { font-size: 13px; font-weight: 600; }
+  .vsub { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+  .vmove { font-size: 11px; display: flex; gap: 6px; align-items: center;
+           justify-content: flex-end; white-space: nowrap; }
+  .spark-cells { display: flex; gap: 2px; align-items: flex-end; height: 26px; }
+  .spark-cells i { flex: 1; min-width: 4px; background: var(--series-1);
+                   border-radius: 1px 1px 0 0; }
+  .spark-cells i[data-zero="1"] { background: var(--grid); }
+
   /* Level */
   .lvl-head { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-end; }
   .lvl-val { font-size: 44px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
@@ -1731,6 +1817,7 @@ _TEMPLATE = """<!DOCTYPE html>
   <section class="card" id="patterns"></section>
   <section class="card" id="asking"></section>
   <section class="card" id="askpatterns"></section>
+  <section class="card" id="vocabulary"></section>
   <section class="card" id="speech"></section>
   <section class="card" id="quality"></section>
   <section class="card" id="timeline"></section>
@@ -1750,6 +1837,7 @@ const SECTION_LABELS = {
   patterns: "What to work on",
   asking: "Asking questions",
   askpatterns: "Question patterns",
+  vocabulary: "Words to retire",
   speech: "How it was spoken",
   quality: "Reliability",
   timeline: "Timeline",
@@ -1933,6 +2021,9 @@ function lineChart(width, sessions, series, opts = {}) {
 </script>
 <script>
 /* ---------- heat scale ---------- */
+// At or below this many instances, a session's rate is mostly noise.
+const THIN_EVIDENCE = 2;
+
 const BINS = [
   { max: 0.75, token: "--heat-1", label: "\\u2264 0.75" },
   { max: 1.5, token: "--heat-2", label: "0.75\\u20131.5" },
@@ -1972,8 +2063,13 @@ function heatGrid(model) {
           : point.state === "untested" ? "never came up" : "not tracked yet"));
       row.push(cell);
       cell.dataset.state = point.state;
-      if (point.state === "seen")
+      if (point.state === "seen") {
         cell.style.background = `var(${binOf(point.rate).token})`;
+        // Thin evidence, less ink. A cell built on one or two instances is a
+        // different kind of number from one built on twenty, and colouring
+        // them alike invites reading a gradient that is mostly chance.
+        if (point.occurrences <= THIN_EVIDENCE) cell.style.opacity = "0.45";
+      }
       else if (point.state === "clean") cell.style.background = "var(--heat-0)";
       const rows = point.state === "seen"
         ? [{ value: num(point.rate), name: "per 1,000 words" },
@@ -2163,6 +2259,9 @@ const DIRECTION = {
   worsening: { token: "--critical", text: "worsening" },
   steady: { token: "--muted", text: "steady" },
   "n/a": { token: "--muted", text: "too few sessions" },
+  // The rate moved, but on these counts the move cannot be told from chance.
+  // Colouring it green or red would be picking a side of a coin flip.
+  "not separable yet": { token: "--muted", text: "too few instances to tell" },
 };
 
 function patternDetail(cat) {
@@ -2183,6 +2282,8 @@ function patternDetail(cat) {
     el("div", { class: "k", text: label }), el("div", { class: "v", text: value }),
   ]);
   const stats = el("div", { class: "mstats" }, [
+    stat("Latest rate", cat.latest_rate === null ? "not measured"
+      : num(cat.latest_rate) + (cat.latest_count ? ` (${cat.latest_count} instances)` : "")),
     stat("Impact", num(cat.impact)),
     stat("Tier", `severity ${cat.severity} \u00b7 ${cat.tier}`),
     stat("Recency-weighted rate", num(cat.weighted_rate)),
@@ -2242,9 +2343,11 @@ document.getElementById("meta").textContent =
       ])
     : null;
 
-  const improving = H.directions.improving || 0;
+  // How many trends can be told from counting noise at all. Reporting the raw
+  // improving/worsening split here meant reporting coin flips.
+  const unsure = H.directions["not separable yet"] || 0;
   const tail = [
-    `${H.directions.worsening || 0} worsening`,
+    `${unsure} moved but not beyond chance`,
     `${H.directions.steady || 0} steady`,
     `${H.directions["n/a"] || 0} too new to say`,
   ].join(", ");
@@ -2275,8 +2378,8 @@ document.getElementById("meta").textContent =
       // ever go up and they prompt nothing; the denominator they described is
       // in the reliability table, next to the share of it that survived.
       el("div", {}, [
-        el("div", { class: "tile-label", text: "Patterns improving" }),
-        el("div", { class: "tile-val", text: `${improving} of ${H.tracked}` }),
+        el("div", { class: "tile-label", text: "Measurable trends" }),
+        el("div", { class: "tile-val", text: `${H.separable} of ${H.tracked}` }),
         el("div", { class: "tile-note", text: tail }),
       ]),
       el("div", {}, [
@@ -2467,6 +2570,11 @@ document.getElementById("meta").textContent =
   for (const bin of BINS) legend.append(el("div", { class: "legend-item" }, [
     el("span", { class: "key-box", style: `background: var(${bin.token})` }),
     el("span", { text: bin.label }),
+  ]));
+  legend.append(el("div", { class: "legend-item" }, [
+    el("span", { class: "key-box",
+                 style: "background: var(--heat-3); opacity: 0.45" }),
+    el("span", { text: `≤ ${THIN_EVIDENCE} instances — too few to read` }),
   ]));
   legend.append(el("div", { class: "legend-item" }, [
     el("span", { class: "key-box", style: "box-shadow: inset 0 0 0 1px var(--hollow)" }),
@@ -2814,6 +2922,89 @@ function smallLine(width, points, decimals) {
   return root;
 }
 
+/* ---------- words to retire ---------- */
+(() => {
+  const host = document.getElementById("vocabulary");
+  const V = MODEL.vocabulary;
+  if (!V.rows || !V.rows.length) { host.hidden = true; return; }
+
+  const MOVE = {
+    rising: { token: "--critical", text: "still rising" },
+    level: { token: "--warning", text: "not budging" },
+    falling: { token: "--good", text: "falling" },
+    // Said too rarely to have a direction — the same restraint the mistake
+    // trends apply, for the same reason.
+    "too few to tell": { token: "--muted", text: "too few to tell" },
+    "never said": { token: "--muted", text: "never said" },
+  };
+
+  host.append(el("div", { class: "card-head" }, [
+    el("div", {}, [
+      el("h2", { text: "Words to retire" }),
+      el("div", { class: "sub", text:
+        "memory.md carries a table of phrases to stop using and what to say instead. It is "
+        + "written every session and read every session, and nothing ever checked it \\u2014 "
+        + "a standing instruction with no feedback loop, which is the kind of advice that "
+        + "can be wrong for months without anyone noticing. Counted here over the reliable "
+        + "lines of every archived session, worst first." }),
+    ]),
+  ]));
+
+  const bars = (counts) => {
+    const top = Math.max(...counts, 1);
+    const wrap = el("div", { class: "spark-cells" });
+    counts.forEach((n) => {
+      const bar = el("i", { style: `height:${n ? Math.max(12, (n / top) * 100) : 6}%` });
+      if (!n) bar.dataset.zero = "1";
+      wrap.append(bar);
+    });
+    return wrap;
+  };
+
+  for (const row of V.rows) {
+    const move = MOVE[row.movement] || MOVE.level;
+    const detail = row.replacements.length
+      ? "instead: " + row.replacements
+          .map((r) => `${r.phrase} (${r.total}×, ${r.movement})`).join(", ")
+      : "no replacement from the table has been said yet";
+    const block = el("div", { class: "vrow" }, [
+      el("div", {}, [
+        el("div", { class: "vphrase", text: row.phrase }),
+        el("div", { class: "vsub", text: detail }),
+      ]),
+      bars(row.counts),
+      el("div", {}, [
+        el("div", { class: "vmove", style: `color: var(${move.token})` }, [
+          el("span", { class: "dot", style: `background: var(${move.token})` }),
+          el("span", { text: move.text }),
+        ]),
+        el("div", { class: "vsub", style: "text-align:right",
+                    text: `${row.total}× in all` }),
+      ]),
+    ]);
+    const rows = [
+      { value: String(row.total), name: "times in all" },
+      { value: `${num(row.early, 2)} → ${num(row.late, 2)}`,
+        name: "per 1,000 words, first half to second" },
+    ];
+    const show = (ev) => showTip(ev.clientX ?? 0, ev.clientY ?? 0, row.phrase, rows);
+    block.addEventListener("pointermove", show);
+    block.addEventListener("pointerleave", hideTip);
+    host.append(block);
+  }
+
+  const notes = [];
+  if (V.never_said.length) notes.push(
+    `${V.never_said.length} entries in the table have never appeared in an archived `
+    + `session: ${V.never_said.slice(0, 4).join(", ")}`
+    + (V.never_said.length > 4 ? ", …" : "") + ".");
+  notes.push("A count cannot tell a word used well from one leaned on \\u2014 a phrase can "
+    + "be on the list for being vague rather than forbidden. Read it as a prompt to look. "
+    + "Counts are on word boundaries over reliable lines only, so “cool” does not "
+    + "collect “cooling”.");
+  host.append(el("div", { class: "note", text: notes.join(" ") }));
+})();
+
 /* ---------- how it was spoken ---------- */
 (() => {
   const host = document.getElementById("speech");
@@ -3075,8 +3266,13 @@ function smallLine(width, points, decimals) {
       return cell(null, "not measured", `untested ×${r.untested_since}`);
     const detail = r.absence_streak
       ? `clean ×${r.absence_streak} running`
-      : `${r.direction}${r.stalled ? " · stalled" : ""}`;
-    return cell(r.speech_rate > 0 ? "--critical" : "--good", num(r.speech_rate), detail);
+      : `${DIRECTION[r.direction] ? DIRECTION[r.direction].text : r.direction}`
+        + `${r.stalled ? " · stalled" : ""}`;
+    // The count beside the rate: a rate on its own hides whether it rests on
+    // one instance or twenty.
+    const shown = num(r.speech_rate)
+      + (r.speech_count ? ` (${r.speech_count})` : "");
+    return cell(r.speech_rate > 0 ? "--critical" : "--good", shown, detail);
   };
 
   /* ---- the rows ---- */
