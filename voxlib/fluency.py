@@ -311,6 +311,23 @@ def warn_if_unreliable(metrics: FluencyMetrics) -> str | None:
 _ANNOTATED_LINE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)\](?P<marker>\s\[\?\])?\s*(?P<text>.*)$")
 
 
+def reliable_lines_from_annotated(text: str) -> list[str]:
+    """The spoken text of every line whisper was confident about.
+
+    Which lines to trust is this module's rule, and it is not a detail — see the
+    module docstring on what happens to a filler count when mis-recognised lines
+    are included. Anything else measuring the speaker's words over a session's
+    transcript reads them through here rather than re-deriving the marker
+    convention.
+    """
+    lines = []
+    for raw in text.splitlines():
+        match = _ANNOTATED_LINE.match(raw.strip())
+        if match and not match.group("marker"):
+            lines.append(match.group("text"))
+    return lines
+
+
 def metrics_from_annotated_text(text: str) -> FluencyMetrics:
     """
     Fluency for an already-archived transcript, read from the ANNOTATED file.
@@ -479,6 +496,116 @@ def append_history(
         writer.writerow(row)
 
     logger.info("Fluency measurement appended to %s", history_path)
+
+
+@dataclass
+class HistoryRow:
+    """One recorded run, as read back out of the history CSV.
+
+    Every numeric field is Optional for the same reason `_history_row` writes an
+    empty cell rather than a 0: the older rows predate columns that exist now,
+    and a backfilled row never had a clock to measure speech time with. A reader
+    that turns those blanks into zeros invents a session that was measured and
+    came out at nothing.
+    """
+    run_at: str
+    date: str
+    origin: str
+    mode: str
+    files: Optional[int]
+    total_lines: Optional[int]
+    low_confidence_lines: Optional[int]
+    low_confidence_share: Optional[float]
+    low_confidence_word_share: Optional[float]
+    total_words: Optional[int]
+    reliable_words: Optional[int]
+    speech_minutes: Optional[float]
+    words_per_minute: Optional[float]
+    speech_time_basis: str
+    filler_count: Optional[int]
+    fillers_per_100_words: Optional[float]
+    discourse_marker_count: Optional[int]
+    discourse_markers_per_100_words: Optional[float]
+    median_pause_sec: Optional[float]
+    long_pauses: Optional[int]
+
+    @property
+    def comparable_pace(self) -> bool:
+        """Whether this row's words_per_minute can be plotted beside another's.
+
+        It cannot be, across a change of basis. Diarization hands over VAD-tight
+        turns and whisper's own segments include the pauses inside them, so the
+        same speaker at the same speed measures substantially faster on the
+        first than on the second — the module docstring has the measured gap. A
+        history that crosses that line, drawn as one series, shows a collapse in
+        pace that never happened.
+        """
+        return bool(self.speech_time_basis) and self.words_per_minute is not None
+
+
+def _number(raw: str, cast):
+    raw = (raw or "").strip()
+    if raw == "":
+        return None
+    try:
+        return cast(raw)
+    except ValueError:
+        # A malformed cell is missing data, not a reason to refuse the file:
+        # this history is the only copy of every past run.
+        logger.warning("Unreadable numeric cell %r in the fluency history", raw)
+        return None
+
+
+def load_history(path: Path) -> list[HistoryRow]:
+    """Every recorded run, oldest first. Missing file means nothing measured yet.
+
+    Rows are returned as recorded, including two runs of the same date — see
+    `latest_per_date` for the one-row-per-session view most readers want.
+    """
+    if not path.exists():
+        return []
+
+    rows: list[HistoryRow] = []
+    with path.open("r", encoding="utf-8", newline="") as f:
+        for raw in csv.DictReader(f):
+            rows.append(HistoryRow(
+                run_at=(raw.get("run_at") or "").strip(),
+                date=(raw.get("date") or "").strip(),
+                origin=(raw.get("origin") or "").strip(),
+                mode=(raw.get("mode") or "").strip(),
+                files=_number(raw.get("files"), int),
+                total_lines=_number(raw.get("total_lines"), int),
+                low_confidence_lines=_number(raw.get("low_confidence_lines"), int),
+                low_confidence_share=_number(raw.get("low_confidence_share"), float),
+                low_confidence_word_share=_number(raw.get("low_confidence_word_share"), float),
+                total_words=_number(raw.get("total_words"), int),
+                reliable_words=_number(raw.get("reliable_words"), int),
+                speech_minutes=_number(raw.get("speech_minutes"), float),
+                words_per_minute=_number(raw.get("words_per_minute"), float),
+                speech_time_basis=(raw.get("speech_time_basis") or "").strip(),
+                filler_count=_number(raw.get("filler_count"), int),
+                fillers_per_100_words=_number(raw.get("fillers_per_100_words"), float),
+                discourse_marker_count=_number(raw.get("discourse_marker_count"), int),
+                discourse_markers_per_100_words=_number(
+                    raw.get("discourse_markers_per_100_words"), float),
+                median_pause_sec=_number(raw.get("median_pause_sec"), float),
+                long_pauses=_number(raw.get("long_pauses"), int),
+            ))
+    rows.sort(key=lambda r: (r.date, r.run_at))
+    return rows
+
+
+def latest_per_date(rows: list[HistoryRow]) -> list[HistoryRow]:
+    """One row per session date — the last run of that date wins.
+
+    A recording re-run after a fix appends a second row for the same date rather
+    than replacing the first (the file is append-only). The later run is the
+    current measurement of that session; the earlier one stays on record.
+    """
+    by_date: dict[str, HistoryRow] = {}
+    for row in rows:
+        by_date[row.date] = row
+    return [by_date[date] for date in sorted(by_date)]
 
 
 def write_json(path: Path, metrics: FluencyMetrics, *, mode: str, files: int) -> None:
