@@ -395,6 +395,65 @@ def next_rung_requirements(reading: Reading) -> list[dict]:
     return out
 
 
+def closest_gap(reading: Reading) -> Optional[dict]:
+    """The single measure nearest to clearing the next rung, and how far short.
+
+    The level line is deliberately slow — three qualifying sessions before it
+    moves — which is right for a level and useless as weekly feedback: it has
+    read B1+ for twelve sessions running while the numbers underneath moved a
+    great deal. `blockers` names the dimensions holding it, but a dimension is
+    not something anyone can act on. A measure is, and the distance to the next
+    threshold changes every session even when the rung does not.
+
+    Ranked by relative shortfall rather than absolute, because the measures are
+    in four different units — 0.88 fillers per 100 words and 0.3565 MATTR cannot
+    be compared as distances, only as proportions of what is being asked for.
+    """
+    if reading.level is None or reading.level + 1 >= len(SCALE):
+        return None
+    # `reading.level` can be BELOW_SCALE (-1), which is a real reading and not a
+    # missing one. Clamping it to 0 first made the next rung B1+ when the rung
+    # actually above "below B1" is B1, and the headline then measured progress
+    # against a threshold two rungs away.
+    target = reading.level + 1
+
+    unmet = []
+    for dimension in DIMENSIONS:
+        for measure in dimension.measures:
+            value = reading.values.get(measure.key)
+            threshold = measure.thresholds[target]
+            if value is None or threshold is None:
+                continue
+            met = value <= threshold if measure.lower_is_better else value >= threshold
+            if met:
+                continue
+            # A zero used to be skipped here to keep it out of the division
+            # below. That was right for a lower-is-better measure and wrong for
+            # the others: zero is the worst reading a share or a ratio can take,
+            # and dropping it meant the panel went silent on the one session
+            # where a single measure was holding the level back. The `met` test
+            # above already guards the division — a lower-is-better zero clears
+            # every threshold and never reaches it.
+            # 1.0 means "at the threshold"; below it is how far short.
+            progress = (threshold / value) if measure.lower_is_better else (value / threshold)
+            unmet.append({
+                "dimension": dimension.label,
+                "measure": measure.label,
+                "key": measure.key,
+                "unit": measure.unit,
+                "value": value,
+                "threshold": threshold,
+                "lower_is_better": measure.lower_is_better,
+                "progress": round(min(progress, 1.0), 3),
+                "shortfall": round(abs(value - threshold), 4),
+                "target": SCALE[target],
+            })
+    if not unmet:
+        return None
+    unmet.sort(key=lambda m: -m["progress"])
+    return unmet[0]
+
+
 def format_report(readings: list[Reading]) -> str:
     if not readings:
         return "No sessions recorded yet, so there is nothing to place on the scale."

@@ -55,7 +55,9 @@ from __future__ import annotations
 import csv
 import logging
 import math
+import statistics
 from dataclasses import dataclass
+from datetime import date as date_type
 from pathlib import Path
 from typing import Optional
 
@@ -233,6 +235,67 @@ def load(path: Path) -> list[SessionRow]:
 def session_dates(rows: list[SessionRow]) -> list[str]:
     """Every date in the history, oldest first, deduplicated."""
     return sorted({r.date for r in rows})
+
+
+# How many recent gaps the cadence reads. Three again: two recordings make one
+# gap, which is an interval rather than a habit.
+CADENCE_WINDOW = 3
+
+
+@dataclass
+class Cadence:
+    """How often recordings are actually happening, and whether that is changing.
+
+    The histories here are all *per session*, which quietly assumes sessions
+    arrive at a steady rate. On this project's own record they do not — the gaps
+    run 1, 2, 2, 1, 1, 5, 3, 7, 7, 7, 9 days — so "per session" and "per week"
+    have drifted apart by a factor of nine while every chart was drawn against
+    the first. Nothing was measuring that, which is why the drift was invisible.
+    """
+    sessions: int
+    first: str
+    last: str
+    gaps: list[int]
+    median_gap: Optional[float]
+    recent_median: Optional[float]
+
+    @property
+    def direction(self) -> str:
+        """Whether the gap between sessions is opening or closing.
+
+        Compared against the whole record rather than against the previous gap:
+        one long weekend is not a change of habit. Reported as "steady" unless
+        the recent window differs by more than a quarter, the same margin
+        `_direction` uses on the rates.
+        """
+        if self.median_gap is None or self.recent_median is None or len(self.gaps) < 4:
+            return "n/a"
+        if self.recent_median > self.median_gap * 1.25:
+            return "lengthening"
+        if self.recent_median < self.median_gap * 0.75:
+            return "shortening"
+        return "steady"
+
+
+def cadence(dates: list[str]) -> Cadence:
+    """The rhythm of the recordings, from their dates alone."""
+    ordered = sorted(d for d in dates if d)
+    gaps: list[int] = []
+    for earlier, later in zip(ordered, ordered[1:]):
+        try:
+            gaps.append((date_type.fromisoformat(later)
+                         - date_type.fromisoformat(earlier)).days)
+        except ValueError:
+            continue
+    recent = gaps[-CADENCE_WINDOW:]
+    return Cadence(
+        sessions=len(ordered),
+        first=ordered[0] if ordered else "",
+        last=ordered[-1] if ordered else "",
+        gaps=gaps,
+        median_gap=round(statistics.median(gaps), 1) if gaps else None,
+        recent_median=round(statistics.median(recent), 1) if recent else None,
+    )
 
 
 def record_session(

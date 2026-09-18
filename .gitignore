@@ -7,6 +7,8 @@ drills/*
 !drills/README.txt
 asking/*
 !asking/README.txt
+frames/*
+!frames/README.txt
 output/
 analysis/sessions/*
 !analysis/sessions/README.txt
@@ -17,6 +19,7 @@ analysis/fluency_history.csv
 analysis/lexis_history.csv
 analysis/vocab_history.csv
 analysis/level_history.csv
+analysis/opportunity_history.csv
 analysis/mistakes.csv
 analysis/drills.csv
 analysis/drill_items.csv

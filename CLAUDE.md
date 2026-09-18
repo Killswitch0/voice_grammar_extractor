@@ -68,6 +68,18 @@ asking/                Question Practice Mode's content. PERSONAL DATA and gitig
                              situation the owner has to ask their way out of, with
                              an in-role reply, what it withholds, and the criteria
                              it is scored against
+frames/                one YAML per group of categories: a regex per tracked mistake
+                         matching a line where the structure came up at all. The
+                         denominator everything else here lacks — `mistakes.csv` counts
+                         errors and nothing counted chances, so words spoken stood in for
+                         them. PERSONAL DATA and gitignored, for the same reason `drills/`
+                         is: a trigger is the list of words this particular speaker gets
+                         wrong. Read with `python -m voxlib.opportunity`; a frame is only
+                         used as a denominator where `python -m voxlib.exposure` says it
+                         predicts that category's errors better than the word count does.
+                         See frames/README.txt, and tests/fixtures/frames/ for an invented
+                         example. Empty on a fresh clone, and every figure downstream
+                         falls back to the per-1,000-words rate while it stays that way
 drills/                one YAML per spoken drill: the prompts, a model answer and a
                          counter-example per item, and the patterns that score them.
                          PERSONAL DATA and gitignored — the prompts are reconstructions
@@ -80,41 +92,42 @@ output/                 all overwritten on every run:
   transcript_annotated.txt  timestamps, source file, [?] markers — for reading by eye
   lines.json                the same lines with per-line confidence/timing — analyze from this
   fluency.json              this run's fluency measurement
-  dashboard.html            every history in analysis/ as one page. It draws the level
-                              line by calling voxlib.level directly, never by reading
-                              level_history.csv, so the page and `python -m voxlib.level`
-                              cannot disagree — which also means the range dimension is
-                              blank until `python -m voxlib.lexis --write` has been run.
-                              The trend chart plots the clarity tier against the polish
-                              tier rather than one total, because a total is dominated by
-                              whichever category is most frequent and that can be one a
-                              listener understands instantly. Under it is the current
-                              verdict from `python -m voxlib.exposure` on whether dividing
-                              by reliable words is comparing like with like at all.
-                              It opens with a "Do this next" list — the crossing of which rung a pattern
-                              fails on, its impact ranking and what the spaced-repetition
-                              schedule says is late — then the mistake rate over
-                              time, a category-by-session heatmap, one card per tracked
-                              mistake ranked by impact — one expandable row each, the
-                              collapsed row carrying the three-rung diagnosis (drills.csv
-                              = knows the form, practice_history.csv = produces it when
-                              attending, mistakes.csv = produces it unmonitored) and the
-                              open row its trend, worked examples and notes; a "What's
-                              working" block that only ever lists measurements that moved
-                              the right way; the speech panel
-                              (pace grouped by speech_time_basis and never joined across it,
-                              filler and discourse-marker rates, pauses) with a per-session
-                              reliability table, Question Practice Mode's own scores
-                              (scenario criteria, which criteria keep failing, the warm-up
-                              blocks' offered-vs-attempted counts, asking_memory.md's
-                              patterns) and a timeline of every dated thing, linking each
-                              recording to its report under analysis/sessions/. Built on
-                              demand with
-                              `python -m voxlib.dashboard --open`, NOT by a pipeline run, so
-                              rebuild it after a session to see that session in it. It only
-                              ever reads analysis/; it computes no metric of its own, every
-                              number on it comes from the module that owns the file it came
-                              from (voxlib/dashboard.py says why that rule matters)
+  dashboard.html            every history in analysis/ as one page, in two views.
+                              **Now** answers the questions asked on every open and is
+                              bounded — the same three or four screens at session 12 and at
+                              session 300: the loop strip (is the measuring side running,
+                              is the training side, is anything overdue — rule 19's two
+                              counts as elapsed time rather than as a fortnight's total),
+                              the level with the single nearest unmet threshold beside it,
+                              the clarity-tier rate, ONE thing to do next with the rest
+                              behind a disclosure (rule 20), the rate over time with drills
+                              and practice sessions marked on the same axis, a start-to-now
+                              comparison, and the focus slate as a rule-17 portfolio.
+                              **Evidence** holds everything that grows one row or one column
+                              per session and is navigated rather than scrolled past: the
+                              level detail, every tracked pattern, the chances table, the
+                              heatmap, the speech panel (pace grouped by speech_time_basis
+                              and never joined across it), Question Practice Mode's scores,
+                              the words to retire, the reliability table, the timeline, and
+                              an "About this page" block saying how much the page as a whole
+                              actually knows.
+                              Three things it will not draw: an untested cell as a zero, a
+                              category before it was tracked, and — as the headline — a
+                              total that rises as coaching finds new categories. The
+                              day-one cohort is drawn instead, because it counts the same
+                              things at both ends. It draws the level by calling
+                              voxlib.level directly, never by reading level_history.csv, so
+                              the page and `python -m voxlib.level` cannot disagree — which
+                              also means the range dimension is blank until
+                              `python -m voxlib.lexis --write` has been run. Built on demand
+                              with `python -m voxlib.dashboard --open`, NOT by a pipeline
+                              run, so rebuild it after a session to see that session in it.
+                              It only ever reads analysis/ and frames/; it computes no
+                              metric of its own, every number on it comes from the module
+                              that owns the file it came from — the ranking from
+                              voxlib/priority.py, the chances from voxlib/opportunity.py
+                              (voxlib/dashboard.py says why that rule matters, and
+                              voxlib/dashboard_page.py holds the page itself)
 analysis/
   memory.md              the persistent, cross-session tracker — read/update every session
   memory_archive.md      long-resolved mistakes, moved out of memory.md to keep it short
@@ -140,6 +153,14 @@ analysis/
                            archived annotated transcripts, so it can always be recomputed
                            and there is no judgment in it to preserve. The CEFR "range"
                            dimension, which nothing else here measures
+  opportunity_history.csv  REWRITTEN, not appended, by `python -m voxlib.opportunity
+                           --write`: how many chances each tracked mistake had, per
+                           session, counted over the reliable lines of the archived
+                           transcripts through the triggers in `frames/`. A lexical proxy
+                           for a grammatical opportunity, and the same proxy every session
+                           — it buys a series comparable with itself, not an exam grade.
+                           Every row carries the trigger's fingerprint, so a frame edited
+                           later cannot draw one trend through two different measurements
   level_history.csv      REWRITTEN, not appended, by `python -m voxlib.level --write`: the
                            sub-band level per session (B1 / B1+ / B2.1 ... ), each rung
                            earned against explicit thresholds on four dimensions —
@@ -225,3 +246,4 @@ session reassesses something differently.
 | `lexis_history.csv` | `python -m voxlib.lexis --write` | lexical variety and novelty, recomputed from the archive |
 | `vocab_history.csv` | `python -m voxlib.vocab --write` | whether the retired phrases are actually going away — recomputed from the archive |
 | `level_history.csv` | `python -m voxlib.level --write` | the sub-band level, earned against thresholds — recomputed, never hand-edited |
+| `opportunity_history.csv` | `python -m voxlib.opportunity --write` | how many chances each mistake had — recomputed from the archive and the frames |

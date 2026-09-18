@@ -165,6 +165,93 @@ def analyse(rows: list[mistakes.SessionRow]) -> Optional[Report]:
     )
 
 
+@dataclass
+class DenominatorVerdict:
+    """Which denominator a category has actually earned.
+
+    The per-word rate is this project's default and is embedded everywhere, so
+    replacing it for a category is a claim that has to be paid for: the
+    opportunity count must predict that category's errors *better* than words
+    do, and well enough to be a relationship rather than scatter. Anything
+    short of that keeps the word denominator, and the page says which one it is
+    showing — a mixed table is honest, a silently swapped denominator is not.
+    """
+    category: str
+    pairs: int
+    r_words: Optional[float]
+    r_opportunities: Optional[float]
+
+    @property
+    def prefer_opportunities(self) -> bool:
+        if self.r_opportunities is None or self.pairs < MIN_PAIRS:
+            return False
+        if self.r_opportunities < SUPPORTS_PER_WORD:
+            return False
+        # A word correlation that is absent is not a bar to clear; one that is
+        # present has to be beaten.
+        return self.r_words is None or self.r_opportunities > self.r_words
+
+    @property
+    def verdict(self) -> str:
+        if self.r_opportunities is None or self.pairs < MIN_PAIRS:
+            return f"too few sessions to test (needs {MIN_PAIRS})"
+        if self.prefer_opportunities:
+            return "chances predict the errors better than words do"
+        if self.r_opportunities < SUPPORTS_PER_WORD:
+            return "the trigger does not predict the errors either — rewrite it or drop it"
+        return "no better than words; keeping the per-1,000 rate"
+
+
+def compare_denominators(rows: list[mistakes.SessionRow], counts: list) -> list[DenominatorVerdict]:
+    """Score both denominators for every category that has a frame.
+
+    `counts` is `list[opportunity.Count]`, passed in rather than imported, so
+    this module keeps its single dependency and `opportunity` keeps its own —
+    the two would otherwise import each other.
+
+    Both correlations are taken over exactly the same sessions: the ones where
+    the category was measured *and* a chance count exists. Scored over different
+    session sets, the comparison would be between two different questions.
+    """
+    opportunities = {(c.date, c.category): c.opportunities for c in counts}
+    by_category: dict[str, list[mistakes.SessionRow]] = {}
+    for row in rows:
+        if row.occurrences is not None and (row.date, row.category) in opportunities:
+            by_category.setdefault(row.category, []).append(row)
+
+    verdicts = []
+    for category, observed in sorted(by_category.items()):
+        observed.sort(key=lambda r: r.date)
+        errors = [float(r.occurrences) for r in observed]
+        words = [float(r.reliable_words) for r in observed]
+        chances = [float(opportunities[(r.date, r.category)]) for r in observed]
+        verdicts.append(DenominatorVerdict(
+            category=category,
+            pairs=len(observed),
+            r_words=correlation(words, errors),
+            r_opportunities=correlation(chances, errors),
+        ))
+    return verdicts
+
+
+def format_denominators(verdicts: list[DenominatorVerdict]) -> str:
+    if not verdicts:
+        return ("No frames to test — nothing counts chances yet. See frames/README.txt.")
+
+    def show(value: Optional[float]) -> str:
+        return "—" if value is None else f"{value:+.2f}"
+
+    header = f"{'Category':<44}{'vs words':>10}{'vs chances':>12}{'n':>4}  Verdict"
+    lines = [header, "-" * len(header)]
+    for v in sorted(verdicts, key=lambda v: (not v.prefer_opportunities, v.category)):
+        lines.append(f"{v.category[:42]:<44}{show(v.r_words):>10}"
+                     f"{show(v.r_opportunities):>12}{v.pairs:>4}  {v.verdict}")
+    winners = [v.category for v in verdicts if v.prefer_opportunities]
+    lines += ["", f"{len(winners)} of {len(verdicts)} categories have earned the chance-based "
+                  f"denominator." + (" The rest keep the per-1,000 rate." if winners else "")]
+    return "\n".join(lines)
+
+
 def format_report(report: Optional[Report]) -> str:
     if report is None:
         return f"Fewer than {MIN_PAIRS} sessions recorded — nothing to test yet."
@@ -218,10 +305,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--path", type=Path, default=_default_path(),
                         help="Mistake history (default: analysis/mistakes.csv)")
+    parser.add_argument("--frames", type=Path, default=_default_path().parent.parent / "frames",
+                        help="Trigger definitions, to score the chance-based denominator "
+                             "against the per-word one (default: frames/)")
     args = parser.parse_args(argv)
 
-    report = analyse(mistakes.load(args.path))
+    rows = mistakes.load(args.path)
+    report = analyse(rows)
     print(format_report(report))
+
+    # The second question, and the one with something to do about it: where a
+    # frame exists, is dividing by chances better than dividing by words?
+    from . import opportunity
+    frames = opportunity.load_frames(args.frames)
+    if frames:
+        counts = opportunity.count(args.path.parent / "sessions", frames)
+        print()
+        print(format_denominators(compare_denominators(rows, counts)))
     return 0 if report else 1
 
 

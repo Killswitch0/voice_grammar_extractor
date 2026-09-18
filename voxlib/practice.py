@@ -136,6 +136,159 @@ _ASK_NOTES_PREFIX = "question practice"
 # few words to divide by, and the whole history would average away the present.
 COMPARISON_SESSIONS = 3
 
+# When a side of the loop stops being current. Rule 19 budgets in weeks
+# ("roughly two recordings a week"), so a week is the point at which a side is
+# behind and a fortnight the point at which it has stopped — `BUDGET_DAYS` is
+# already the window the rule's own counts are read over.
+#
+# Stated here rather than in the page that draws them, because a threshold in a
+# stylesheet is a threshold nobody can argue with: these two numbers decide
+# whether the dashboard opens saying the loop is running or saying it is not.
+LOOP_WARN_DAYS = 7
+LOOP_STALE_DAYS = BUDGET_DAYS
+
+
+def _elapsed(since: Optional[str], today: str) -> Optional[int]:
+    if not since:
+        return None
+    try:
+        return (date_type.fromisoformat(today) - date_type.fromisoformat(since)).days
+    except ValueError:
+        return None
+
+
+def _state(days: Optional[int]) -> str:
+    """`ok` / `warn` / `stale` / `never`, from one elapsed count."""
+    if days is None:
+        return "never"
+    if days <= LOOP_WARN_DAYS:
+        return "ok"
+    return "warn" if days <= LOOP_STALE_DAYS else "stale"
+
+
+@dataclass
+class LoopSide:
+    """One half of the loop: when it last happened and how that reads."""
+    key: str
+    label: str
+    last: str                     # "" when it has never happened
+    days: Optional[int]
+    state: str
+    detail: str = ""
+
+    @property
+    def running(self) -> bool:
+        return self.state == "ok"
+
+
+@dataclass
+class LoopState:
+    """
+    Whether the loop this project is built around is actually turning.
+
+    Rule 19 splits the work in two: the recording is the instrument and the
+    corrected repetitions are the treatment. Both counts already existed — the
+    recording dates in `mistakes.csv`, the repetitions in this file — and
+    `budget_line` has printed them side by side for a fortnight at a time. What
+    neither said is how long it has been since each last happened, which is the
+    form the question actually takes when you open a page after three weeks:
+    not "how many in the last fortnight" but "is this still going".
+
+    The third side is the spaced-repetition schedule, because a review that is
+    late is the one kind of work here that has a date attached and can therefore
+    be *late* rather than merely undone.
+
+    No streak. A streak counts consecutive days and would reward whichever side
+    is easiest to do daily — which here is the recording, the side that is
+    already over-supplied. An elapsed count says the same thing without turning
+    a quiet fortnight into a failure.
+    """
+    today: str
+    measure: LoopSide
+    train: LoopSide
+    review: LoopSide
+    recordings_in_window: int
+    sessions_in_window: int
+    repetitions_in_window: int
+    missed_in_window: int
+    window_days: int
+
+    @property
+    def sides(self) -> list[LoopSide]:
+        return [self.measure, self.train, self.review]
+
+    @property
+    def instrument_ahead(self) -> bool:
+        """Rule 19's failure mode: measuring more than treating."""
+        return self.recordings_in_window > self.sessions_in_window
+
+    @property
+    def worst(self) -> LoopSide:
+        order = {"stale": 0, "never": 1, "warn": 2, "ok": 3}
+        return sorted(self.sides, key=lambda s: (order[s.state], -(s.days or 0)))[0]
+
+
+def loop_state(sessions: list[PracticeSession], recording_dates: list[str],
+               overdue: Optional[list[tuple[str, str]]] = None,
+               today: Optional[str] = None) -> LoopState:
+    """
+    The three sides of the loop, as of `today`.
+
+    `overdue` is `(category, next_due)` for every schedule row already past its
+    date — passed in rather than read here, because `focus_log` owns that file
+    and this module has never imported it.
+
+    "Trained" means a session that produced at least one corrected repetition,
+    not merely a session that happened. A practice session with no repetitions
+    in it is the failure rule 19 describes, so counting it as treatment would
+    report the loop as turning on exactly the evidence that it is not.
+    """
+    today = today or date_type.today().isoformat()
+    start = (date_type.fromisoformat(today) - timedelta(days=BUDGET_DAYS)).isoformat()
+
+    # Bounded at both ends. A date after `today` is not evidence that anything
+    # has happened recently — it is a typo, a clock that was wrong, or a
+    # simulated history — and counting it reports a loop running hard while
+    # nothing has been done at all.
+    recorded = sorted(d for d in recording_dates if d and d <= today)
+    trained = sorted(s.date for s in sessions if s.reproductions > 0 and s.date <= today)
+    recent = [s for s in sessions if start < s.date <= today]
+    overdue = sorted(overdue or [], key=lambda o: o[1])
+
+    measure_days = _elapsed(recorded[-1] if recorded else None, today)
+    train_days = _elapsed(trained[-1] if trained else None, today)
+
+    measure = LoopSide(
+        key="measure", label="Measure", last=recorded[-1] if recorded else "",
+        days=measure_days, state=_state(measure_days),
+        detail=f"{len(recorded)} recording{'' if len(recorded) == 1 else 's'} analysed",
+    )
+    train = LoopSide(
+        key="train", label="Train", last=trained[-1] if trained else "",
+        days=train_days, state=_state(train_days),
+        detail=("no corrected repetition on record" if not trained else
+                f"{len(trained)} session{'' if len(trained) == 1 else 's'} with a repetition "
+                "in them"),
+    )
+    review_days = _elapsed(overdue[0][1] if overdue else None, today)
+    review = LoopSide(
+        key="review", label="Review", last=overdue[0][1] if overdue else "",
+        days=review_days,
+        # An empty schedule is nothing to be late for, not a late thing.
+        state="ok" if not overdue else _state(review_days),
+        detail=("nothing overdue" if not overdue else
+                f"{len(overdue)} overdue, oldest {overdue[0][0]}"),
+    )
+
+    return LoopState(
+        today=today, measure=measure, train=train, review=review,
+        recordings_in_window=sum(1 for d in recorded if d > start),
+        sessions_in_window=len(recent),
+        repetitions_in_window=sum(s.reproductions for s in recent),
+        missed_in_window=sum(s.reproductions_missed for s in recent),
+        window_days=BUDGET_DAYS,
+    )
+
 
 def is_provisional(category: str) -> bool:
     """Whether a breakdown entry names an untracked form rather than a tracked

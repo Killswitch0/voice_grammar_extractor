@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from voxlib import dashboard, fluency
+from voxlib import dashboard, priority, fluency
 from voxlib.mistakes import MistakeCount
 from voxlib import mistakes
 
@@ -246,6 +246,8 @@ def _practice(path: Path, rows: list[dict]) -> None:
             path, date=row["date"], focus=row.get("focus", "practice"),
             learner_words=row["words"], errors_by_category=row.get("errors", {}),
             mode=row.get("mode", practice.ANSWER_MODE),
+            reproductions=row.get("reproductions", 0),
+            reproductions_missed=row.get("missed", 0),
         )
 
 
@@ -944,11 +946,15 @@ def test_the_first_action_is_the_one_where_drilling_is_the_wrong_answer(tmp_path
 
     actions = dashboard.build_model(analysis_dir=directory)["actions"]
 
-    assert actions[0]["kind"] == "automaticity-gap"
-    assert actions[0]["title"] == "Stop drilling Article Errors — produce it in dialogue"
-    assert "100% correct over 10 drill items" in actions[0]["detail"]
+    # A loop blocker can outrank it — a ranking nobody acts on is not a plan —
+    # so the claim is that it leads the *patterns*, not the whole list.
+    patterns = [a for a in actions if not a["blocking"]]
+
+    assert patterns[0]["kind"] == "automaticity-gap"
+    assert patterns[0]["title"] == "Produce it in dialogue: Article Errors"
+    assert "100% correct over 10 drill items" in patterns[0]["detail"]
     # The ladder and the card grid are one section now, so that is where it points.
-    assert actions[0]["anchor"] == "patterns"
+    assert patterns[0]["anchor"] == "patterns"
 
 
 def test_an_overdue_question_pattern_counts_even_with_no_rung_three(tmp_path: Path):
@@ -956,6 +962,10 @@ def test_an_overdue_question_pattern_counts_even_with_no_rung_three(tmp_path: Pa
     The schedule covers question patterns the recording cannot measure, and they
     are kept out of the ladder table for that reason. Being off the table must
     not mean being off the to-do list.
+
+    A tracked grammar pattern that is late carries that as a flag on its own
+    row, so it needs no line of its own; a question pattern has no row anywhere,
+    and without this nothing on the page would mention it again.
     """
     directory = tmp_path / "analysis"
     directory.mkdir()
@@ -967,12 +977,17 @@ def test_an_overdue_question_pattern_counts_even_with_no_rung_three(tmp_path: Pa
         "| Question Register And Softening Frames | 2026-08-02 | 1 | 2026-08-03 |\n",
         encoding="utf-8")
 
-    actions = dashboard.build_model(analysis_dir=directory, today="2026-08-10")["actions"]
-    overdue = next(a for a in actions if a["kind"] == "overdue")
+    model = dashboard.build_model(analysis_dir=directory, today="2026-08-10")
+    overdue = next(a for a in model["actions"] if a["kind"] == "overdue-dialogue")
 
-    assert overdue["title"] == "2 practice slots are overdue"
-    assert "the oldest since 2026-08-03" in overdue["detail"]
     assert "Question Register And Softening Frames" in overdue["detail"]
+    assert "the oldest since 2026-08-03" in overdue["detail"]
+    assert overdue["anchor"] == "askpatterns"
+
+    # The tracked one is not repeated as its own line; it is a flag where it lives.
+    assert "Article Errors" not in overdue["detail"]
+    tracked = next(t for t in model["slate"] if t["category"] == "Article Errors")
+    assert "overdue" in tracked["flags"]
 
 
 def test_the_action_list_stays_short_enough_to_work_through(tmp_path: Path):
@@ -1008,9 +1023,12 @@ def test_the_action_list_stays_short_enough_to_work_through(tmp_path: Path):
     actions = dashboard.build_model(analysis_dir=directory, today="2026-08-20")["actions"]
 
     assert len(actions) == dashboard.MAX_ACTIONS
-    # The gap kind is itself capped at two, so it cannot crowd out the rest.
-    assert sum(1 for a in actions if a["kind"] == "automaticity-gap") == 2
-    assert len({a["kind"] for a in actions}) == 4
+    # One kind cannot own the list. The old cap was a flat limit of two on the
+    # commonest kind; rule 17's portfolio is the principled version of the same
+    # constraint, and it is asserted on the slate the list is drawn from.
+    slate = dashboard.build_model(analysis_dir=directory, today="2026-08-20")["slate"]
+    assert sum(1 for t in slate if t["tier"] == "polish") <= priority.MAX_POLISH
+    assert sum(1 for t in slate if t["tier"] == "clarity") >= priority.MIN_CLARITY
 
 
 def test_an_empty_project_is_told_to_do_nothing(tmp_path: Path):
@@ -1348,3 +1366,166 @@ def test_the_page_reports_whether_its_own_denominator_holds(tmp_path: Path):
     assert report["length_effect"] is True
     assert report["supports_per_word"] is False
     assert "not removing it" in report["verdict"]
+
+
+# --- the loop, the comparison, and the bounded page ----------------------------
+#
+# The page used to open with a level that cannot move for three sessions and a
+# delta that could be green on a session the clarity tier got worse in, while
+# the fact that the treatment side had stopped a month earlier appeared nowhere.
+# These cover what replaced that, and the two properties the new structure has
+# to keep: the top view stays the same size as the history grows, and the one
+# series comparable end-to-end is drawn rather than hidden behind a toggle.
+
+
+def test_the_page_leads_with_whether_the_loop_is_running(tmp_path: Path):
+    """Every other panel measures the English. This one measures the process,
+    and the two can say opposite things: recordings current, treatment stopped
+    a month ago, every review overdue."""
+    from voxlib import practice
+
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-09-10", 1000, [("Article Errors", 2, 4)]),
+        ("2026-09-17", 1000, [("Article Errors", 2, 4)]),
+    ])
+    _practice(directory / "practice_history.csv", [
+        {"date": "2026-08-18", "words": 200, "errors": {}, "reproductions": 2,
+         "mode": practice.ANSWER_MODE},
+    ])
+
+    loop = dashboard.build_model(analysis_dir=directory, today="2026-09-18")["loop"]
+    sides = {s["key"]: s for s in loop["sides"]}
+
+    assert sides["measure"]["state"] == "ok" and sides["measure"]["days"] == 1
+    assert sides["train"]["state"] == "stale" and sides["train"]["days"] == 31
+    assert loop["instrument_ahead"]
+
+
+def test_the_comparable_series_is_drawn_not_hidden(tmp_path: Path):
+    """The all-categories rate cannot answer "am I better than when I started":
+    it is the sum of the per-category rates and the categories grow as coaching
+    finds them. The day-one cohort can, and it used to be a column inside a
+    table view."""
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        (f"2026-08-{d:02d}", 1000, [("Day one", 2, 2)] + (
+            [("Found later", 2, 8)] if d > 3 else []))
+        for d in range(1, 8)
+    ])
+
+    model = dashboard.build_model(analysis_dir=directory, today="2026-08-20")
+    progress = model["progress"]
+    series = {s["key"]: s for s in progress["series"]}
+
+    assert progress["comparable"]
+    # The cohort held steady; the total doubled on nothing but a new category.
+    assert series["cohort_rate"]["before"] == series["cohort_rate"]["after"]
+    assert series["rate"]["after"] > series["rate"]["before"]
+    assert "counted the same way at both ends" in series["cohort_rate"]["note"]
+
+
+def test_a_start_to_now_comparison_needs_two_windows(tmp_path: Path):
+    """Three sessions against the same three sessions is not a comparison."""
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        (f"2026-08-0{d}", 1000, [("Article Errors", 2, 2)]) for d in range(1, 4)])
+
+    assert not dashboard.build_model(analysis_dir=directory)["progress"]["comparable"]
+
+
+def test_what_was_trained_is_on_the_same_axis_as_what_happened(tmp_path: Path):
+    """The page charted what happened and had no record of what was done on any
+    shared axis, so the question the project exists to ask could not be looked
+    at. Only the repetitions are treatment; a drill measures the form."""
+    from voxlib import drill, practice
+
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 1000, [("Article Errors", 2, 4)]),
+        ("2026-08-08", 1000, [("Article Errors", 2, 1)]),
+    ])
+    _drill(directory / "drills.csv", "Article Errors",
+           [("2026-08-03", 5, 5, drill.BLOCKED)])
+    _practice(directory / "practice_history.csv", [
+        {"date": "2026-08-05", "words": 200, "errors": {}, "reproductions": 3,
+         "mode": practice.ANSWER_MODE},
+        {"date": "2026-08-06", "words": 200, "errors": {}, "reproductions": 0,
+         "mode": practice.ANSWER_MODE},
+    ])
+
+    events = {e["date"]: e for e in dashboard.build_model(analysis_dir=directory)["treatment"]}
+
+    assert events["2026-08-03"]["drills"] == 1 and not events["2026-08-03"]["treatment"]
+    assert events["2026-08-05"]["repetitions"] == 3 and events["2026-08-05"]["treatment"]
+    assert not events["2026-08-06"]["treatment"]
+
+
+def test_the_reserved_fluency_slot_survives_the_truncation(tmp_path: Path):
+    """Rule 17 reserves a slot for fluency or vocabulary, and a reserved slot
+    that gets cut off the end of the list is not reserved. It existed in the
+    code for a while and never once appeared."""
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        (f"2026-08-0{d}", 1000, [(f"Category {n}", 3, 5) for n in range(6)])
+        for d in (1, 2)])
+    (directory / "memory.md").write_text(
+        "# English Memory\n\n# Vocabulary To Replace\n\n"
+        "| I usually say | Better alternatives |\n|---|---|\n"
+        "| everything | name the noun |\n", encoding="utf-8")
+    # A rising phrase is one whose *rate* rises — the same count in a shorter
+    # session is not the habit growing, which is the whole reason vocab.py
+    # divides by words.
+    (directory / "sessions").mkdir()
+    sparse = [f"[00:00:{i:02d}] some other words entirely here" for i in range(9)]
+    dense = [f"[00:00:{i:02d}] everything and everything again" for i in range(9)]
+    (directory / "sessions" / "2026-08-01.annotated.txt").write_text(
+        "\n".join(sparse), encoding="utf-8")
+    (directory / "sessions" / "2026-08-02.annotated.txt").write_text(
+        "\n".join(dense), encoding="utf-8")
+
+    actions = dashboard.build_model(analysis_dir=directory, today="2026-08-20")["actions"]
+
+    assert actions[-1]["kind"] == "fluency-slot"
+    assert "everything" in actions[-1]["title"]
+
+
+def test_the_top_view_does_not_grow_with_the_history(tmp_path: Path):
+    """The point of the two-view split. Every section that grows one row or one
+    column per session lives in Evidence; what is left has to be the same size
+    at session 12 and at session 300, or the page becomes unreadable exactly as
+    the history becomes worth reading."""
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        (f"2026-{8 + d // 28:02d}-{d % 28 + 1:02d}", 1000, [("Article Errors", 2, 4)])
+        for d in range(60)])
+
+    page = dashboard.render(dashboard.build_model(analysis_dir=directory))
+
+    now = page[page.index('<div id="now"'):page.index('<div id="evidence"')]
+    for section in ("loop", "headline", "actions", "trend", "focus", "working"):
+        assert f'id="{section}"' in now
+    # Everything unbounded is on the other side of the split.
+    for section in ("timeline", "quality", "heatmap", "patterns"):
+        assert f'id="{section}"' not in now
+
+
+def test_chances_are_absent_rather_than_guessed_when_no_frame_exists(tmp_path: Path):
+    """frames/ is personal content and a fresh clone has none. Every
+    opportunity-derived element has to be additive, or adding this feature
+    would have broken the page for anyone who never wrote a frame."""
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [("2026-08-01", 1000, [("Article Errors", 2, 4)])])
+
+    model = dashboard.build_model(analysis_dir=directory,
+                                  frames_dir=tmp_path / "no-frames")
+
+    assert model["opportunity"] == {"frames": 0, "rows": [], "adopted": []}
+    assert model["categories"][0]["latest_rate"] is not None      # the word rate still works
