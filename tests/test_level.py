@@ -263,3 +263,35 @@ def test_the_lexical_novelty_gate_waits_for_a_full_baseline(tmp_path: Path):
 
     assert readings["2026-08-02"].values["novelty"] is None   # baseline of one
     assert readings["2026-08-05"].values["novelty"] == pytest.approx(1000.0)
+
+
+# --- what the next rung asks for ------------------------------------------------
+
+def test_a_measure_sitting_at_zero_is_the_gap_not_an_absent_one():
+    """Zero was skipped to keep it out of the division that computes progress.
+    That is right for a lower-is-better measure, which clears every threshold at
+    zero, and wrong for the others: zero is the worst a share can read, and
+    dropping it left the panel silent on a session where one measure was the
+    only thing holding the level back."""
+    reading = level.read_session("2026-09-17", {
+        "clarity": 3.0, "polish": 10.0, "fillers": 0.5, "markers": 2.0,
+        "mattr": 0.40, "novelty": 90.0, "scenarios": 0.0,
+    }, reliable=True)
+    reading.level = 1
+
+    gap = level.closest_gap(reading)
+
+    assert gap is not None
+    assert gap["key"] == "scenarios"
+    assert gap["progress"] == 0.0
+
+
+def test_the_rung_above_below_b1_is_b1():
+    """`BELOW_SCALE` is a reading, not a missing value. Clamping it to 0 before
+    adding one named B1+ as the next rung and measured the distance to it."""
+    reading = level.read_session("2026-09-17", {
+        "clarity": 30.0, "polish": 40.0, "fillers": 9.0, "markers": 9.0,
+    }, reliable=True)
+    reading.level = level.BELOW_SCALE
+
+    assert level.closest_gap(reading)["target"] == "B1"

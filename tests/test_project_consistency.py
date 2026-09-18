@@ -226,24 +226,26 @@ def test_the_personal_data_files_are_all_gitignored():
                  "drills.csv", "drill_items.csv", "practice_history.csv",
                  "conversation_focus_log.md", "asking_memory.md", "asking_archive.md",
                  "asking_drills.csv", "asking_drill_items.csv", "asking_pending.json",
-                 "asking_scenarios.csv"):
+                 "asking_scenarios.csv", "opportunity_history.csv"):
         assert f"analysis/{name}" in ignored, f"analysis/{name} would be committed"
 
 
 def test_the_content_directories_built_from_the_owners_mistakes_are_gitignored():
     """
-    `drills/` and `asking/` are not code with the user's data beside it — the
-    content *is* the data. A drill's prompts are reconstructions of sentences the
-    owner said; a scenario's `trap` is a reconstruction of an error they make, and
-    its situations are the ones that actually happened to them. Both directories
-    were nearly committed on the grounds that the content "looked generic", which
-    is a judgement that does not survive the next file added to them.
+    `drills/`, `asking/` and `frames/` are not code with the user's data beside
+    it — the content *is* the data. A drill's prompts are reconstructions of
+    sentences the owner said; a scenario's `trap` is a reconstruction of an error
+    they make, and its situations are the ones that actually happened to them; a
+    frame's trigger is the list of words this particular speaker gets wrong.
+    These directories were nearly committed on the grounds that the content
+    "looked generic", which is a judgement that does not survive the next file
+    added to them.
 
     Only each README is committed, because it documents the format.
     """
     ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
 
-    for directory in ("drills", "asking"):
+    for directory in ("drills", "asking", "frames"):
         assert f"{directory}/*" in ignored, f"{directory}/ would be committed"
         assert f"!{directory}/README.txt" in ignored, (
             f"{directory}/README.txt is ignored too, so the format is documented nowhere"

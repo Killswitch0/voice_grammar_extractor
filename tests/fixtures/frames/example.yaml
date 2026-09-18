@@ -1,0 +1,18 @@
+# An invented example. Real frames live in frames/, which is gitignored because
+# they are written from one person's own mistakes.
+
+frames:
+  - category: A Or An
+    note: >-
+      An indefinite article in front of a word — the slot where the a/an choice
+      has to be made. Both forms are chances: picking "a" before a vowel and
+      "an" before a consonant are the same mistake in two directions.
+    trigger: \b(a|an)\s+\w+
+
+  - category: Verb Agreement
+    note: >-
+      A singular third-person subject followed by something that is not already
+      an auxiliary, so "it was" is not counted as a present-tense slot.
+    trigger: |
+      \b(he|she|it)\s+
+      (?!is\b|was\b|were\b|has\b|had\b|will\b|can\b|'s)\w+

@@ -422,78 +422,117 @@ python -m voxlib.dashboard --open
 ```
 
 That writes `output/dashboard.html` — a single self-contained page, no network
-access at load. It opens with a short "Do this next" list: the crossing of which
-rung a pattern fails on, how it ranks by impact and what the spaced-repetition
-schedule says is overdue, which otherwise means reading three sections against
-each other. Every line links to the section it came from. A recording the
-pipeline has transcribed but no analysis session has read yet is the first item
-on that list, because until it is read every ranking below it predates it.
+access at load. It has two views.
 
-The headline says what moved it rather than only that something did: the total
-rate is the sum of the per-category rates, so the biggest contributor to a rise
-or a fall is arithmetic and is named. Below that are the
-mistake rate over time, a heatmap of every tracked
-mistake session by session, one card per mistake ranked by impact, and a ladder
-view that reads the three histories against each other. Rebuild it after each
-session; it only ever reads `analysis/`, never writes to it.
+**Now** is the default, and it is bounded: the same three or four screens after
+twelve sessions and after three hundred. It opens with the loop — whether the
+measuring side is running, whether the training side is, and whether anything on
+the spaced-repetition schedule is overdue, each as elapsed days rather than as a
+count. That is first because the two halves can say opposite things: recordings
+every week while the last corrected repetition was a month ago is the failure
+rule 19 describes, and a page that leads with "last analysed: 1 day ago" reports
+it as health.
 
-"What to work on" is the part that says what to do next, and it is one
-expandable row per pattern. Three files measure three different things about the
-same mistake — `drills.csv` is whether the form is known,
-`practice_history.csv` is whether it survives attended production, and
-`mistakes.csv` is whether it survives unmonitored speech — and the rung a
-pattern fails on is the diagnosis carried in the collapsed row. A form drilled
-to 100% that still appears in every recording is not a knowledge gap, so more
-drilling is the one thing that will not fix it; a pattern with no drill at all
-cannot be diagnosed above rung 3 until one exists. Opening a row gives that
-pattern's trend — scaled to its own range — its worked examples and its notes
-from `memory.md`, and each row has its own link (`#pattern-article-errors`) so a
-single pattern can be pointed at.
+Under it: the level, with the single nearest unmet threshold beside it, because
+the rung itself needs three qualifying sessions to move and is the same word for
+weeks while the numbers underneath it move a great deal. Then the clarity-tier
+rate — the errors that cost a listener the meaning — rather than the
+all-categories total, which can fall on a session the clarity tier rose in.
+Then **one** thing to do, with the rest behind a disclosure: at conversational
+speed the number of things anyone can monitor is one, and a list of five is a
+list of zero.
 
-Beside the to-do list is a "What's working" block, because everything else on
-the page is problem-facing and this one is meant to be opened every week for
-months. Nothing on it is rounded in a flattering direction: each line is a
-measurement that moved the right way, and the block is absent entirely when
-none did.
+Then the chart, which is the part that answers *is any of this working*. Drills
+and practice sessions are marked on the same axis as the mistake rate, weighted
+so that a corrected repetition looks different from a drill — only the
+repetitions train. It is an association and the caption says so; what it buys is
+the ability to notice a pattern nobody could previously look at. Beside it, a
+start-to-now comparison on the day-one categories: the only series that counts
+the same things at both ends, and so the only one that can answer "am I better
+than when I started". It used to be a column inside a table view.
 
-The last two panels cover how the speech itself came out. Pace is grouped by
-`speech_time_basis` and never drawn as one line across it — the two bases put
-the same speaker at roughly 105 and 58 words per minute, so a single line would
-show a collapse in fluency that is purely a change of instrument. Filler and
-discourse-marker rates, median pause and long pauses get one small chart each,
-with a blank wherever the number was not measured rather than a zero: the
-backfilled sessions had no clock, and the pause measures are solo-only by
-design. The reliability table then says how much of each session was analysable
-at all, leading with the word share rather than the line share, because that is
-the reading `fluency.warn_if_unreliable` acts on.
+Last in Now is the focus slate — five patterns as a portfolio rather than a
+top-five of one number, since a very frequent survivable error will otherwise
+own every slot and crowd out what a listener actually loses.
 
-Question Practice Mode gets its own two panels, because a recording cannot
-measure it: whether a question was well asked is not in a transcript, so
-nothing there has an unmonitored-speech rung and every score is shown next to
-the number it divides. Scenario runs are listed individually rather than
-averaged by register or function — with roughly one run per register, a grouped
-score would have a denominator of one — and the criteria that fail across
-different situations are charted instead, since those repeat. The warm-up
-blocks report items offered and items attempted separately, which is the
-difference between "scored 100%" and "answered one question of twelve".
+**Evidence** is the other view, reached from the tab or from any link in Now. It
+holds everything that grows one row or one column per session: the level detail,
+every tracked pattern with its notes and worked examples, the chances table, the
+session-by-session heatmap, the speech panel, Question Practice Mode's scores,
+the words to retire, the reliability table and the timeline. It ends with "About
+this page", which states in one place how much the page as a whole knows — how
+many trends cannot be told from chance, how many rankings rest on a handful of
+instances, how many patterns have no drill at all.
 
-The page ends with a timeline of every dated thing: the union of recordings and
-practice days, each recording linked to its archived report under
-`analysis/sessions/`.
+The ranking behind both views is `voxlib/priority.py`, and it is a sort rather
+than a score. What to do about a pattern sorts before how much it costs, because
+the rung it fails on decides whether any action exists: a form drilled to 100%
+that still appears in every recording is not a knowledge gap, so more drilling
+is the one thing that will not fix it, while a pattern with no drill cannot be
+diagnosed above rung 3 at all. Impact breaks ties within a class. Being overdue,
+stalled or thin annotates a row and never moves one — if lateness reordered the
+table, the ranking would become a function of how long since you last practised
+rather than of what is wrong with your English.
 
-Three things it deliberately does not draw, because the honest version differs
-from the obvious one: an untested session is a hole in the line rather than a
-zero (a blank in `mistakes.csv` means the structure never came up, so nothing
-was measured); a category is not plotted before it was first tracked; and the
-all-categories rate is shown beside the rate over only the categories tracked
-since the first session, because the total rises as coaching finds new patterns
-whatever the speaker does.
+Three things the page will not draw, because the honest version differs from the
+obvious one: an untested session is a hole in the line rather than a zero (a
+blank in `mistakes.csv` means the structure never came up); a category is not
+plotted before it was first tracked; and the all-categories total is never the
+headline, because it rises as coaching finds new patterns whatever the speaker
+does.
+
+Rebuild it after each session; it only ever reads `analysis/` and `frames/`,
+never writes to them.
 
 `analysis/` is excluded from this project's own repo (see `.gitignore`) —
 it's your personal data, not something to publish alongside the code. That
 also means it isn't backed up anywhere by default; see
 [`analysis/BACKUP.md`](analysis/BACKUP.md) for a 10-minute setup that gives
 it its own private repo and a one-command backup.
+
+## How many chances did the mistake have?
+
+Everything else here is a numerator. "Six article mistakes per thousand words"
+cannot say *out of how many chances*, because nothing counts how many singular
+countable nouns you actually said — so if you switch from short conversational
+turns to a long monologue, your error rate can rise while your accuracy
+improves. Words spoken stand in for chances, and `python -m voxlib.exposure`
+exists to check whether that substitution holds. On this project's own history
+it does not: counts track how many categories were being looked for better than
+they track anything the speaker did.
+
+A **frame** is the missing denominator — a regex that matches a line where the
+structure came up at all, whether or not it went wrong:
+
+```bash
+python -m voxlib.opportunity          # chances, errors, accuracy per category
+python -m voxlib.exposure             # which denominator each category earns
+```
+
+A frame is a lexical match, not a parsed one, so it is a proxy: a trigger for
+third-person `-s` also catches "it was", which is not a present-tense slot. The
+bias is real and it is the *same* bias every session, which is the property a
+trend needs and the one the per-word rate demonstrably lacks. It buys a series
+comparable with itself, not an exam grade.
+
+Nothing is adopted on faith. `exposure` scores both denominators for every
+category over the same sessions, and a frame is used only where the chance count
+predicts that category's errors better than the word count does. A frame that
+fails keeps the per-1,000-words rate and the page says which one it is showing.
+A category with no frame behaves identically — so this can only add information,
+never remove any, and a fresh clone with no `frames/` sees exactly what it saw
+before.
+
+It also answers a question that had been costing whole sessions. An absence
+streak built on sessions where the structure never arose looks exactly like one
+built on clean production: comparative adjectives sat at "2 of 3 toward
+promotion" for five sessions because no short adjective in a comparative frame
+ever came up. That is now a computed flag rather than something to notice by
+hand, late.
+
+See [`frames/README.txt`](frames/README.txt) for the format and the four rules
+worth following — including the one about not fitting the regex to the history
+you are testing it against.
 
 ## Is the per-1,000 rate comparing like with like?
 
@@ -512,11 +551,13 @@ sessions get longer. If counts do not scale with words, dividing by them does
 not remove a length effect; it adds one, and the shortest session becomes the
 worst.
 
-It changes no metric and writes no history. The normalization is embedded in the
-trackers, the level scale and every chart, and what to do about the answer is a
-decision rather than a calculation. The dashboard prints the current verdict
-under the trend chart. Re-run it as sessions accumulate: early on, the spread of
-session lengths is narrow enough that a real relationship could hide in it.
+It changes no metric on its own. The normalization is embedded in the trackers,
+the level scale and every chart, and what to do about the answer is a decision
+rather than a calculation — `frames/` above is that decision, taken one category
+at a time, and this command is the gate it has to pass. The dashboard prints the
+current verdict under the trend chart. Re-run it as sessions accumulate: early
+on, the spread of session lengths is narrow enough that a real relationship
+could hide in it.
 
 ## Are the trends real?
 
@@ -592,13 +633,9 @@ and how many sessions have passed without falling back to it.
 
 ## Drills
 
-Everything else this project measures is a numerator. "Six article mistakes per
-thousand words" can't say *out of how many chances*, because nothing counts how
-many singular countable nouns you actually said — so if you switch from short
-conversational turns to a long monologue, your error rate can rise while your
-accuracy improves, and the two look identical in the trend.
-
-A drill fixes that by fixing the denominator in advance. It's a set of prompts
+A drill is the other answer to the denominator problem above, and the stricter
+one. A frame counts the chances you had *in speech*, approximately, from a
+regex; a drill fixes the denominator in advance and exactly. It's a set of prompts
 with a known answer key: **12/15 and 8/15 mean the same thing in any session.**
 Each prompt gives the content words only — you supply the grammar:
 

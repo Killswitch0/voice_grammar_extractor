@@ -94,6 +94,7 @@ of your English improving (or not) over time.
 | `analysis/memory_archive.md` | Long-resolved mistakes get moved here so `memory.md` itself stays short and readable |
 | `analysis/scores_history.csv` | Append-only numeric record (CEFR, scores, filler rate) per session — for graphing progress later, separate from the readable text in `memory.md` |
 | `analysis/mistakes.csv` | Append-only record of which mistake categories occurred how often, per session, against that session's reliable-word count. The machine-readable spine under `memory.md`'s prose counters: `python -m voxlib.mistakes` renders it as a trend table ranked by impact |
+| `analysis/opportunity_history.csv` | How many *chances* each tracked mistake had, per session — counted over the archived transcripts through the regexes in `frames/`. Every other number here is a numerator: `mistakes.csv` says how often a form went wrong and nothing said how often it was tried, so words spoken stood in for chances. `python -m voxlib.exposure` tests whether that substitution holds per category, and a frame is only used as a denominator where it beats the word count |
 | `analysis/conversation_focus_log.md` | Written only by Conversation Practice Mode (the `practice-answer` skill, triggered by "let's practice" instead of "analyze the recording") — tracks which `memory.md` patterns were drilled in dialogue and when. Recording analysis reads it for context (to flag a mistake that was drilled in practice but is still occurring) but never writes to it — see "Same repo, second mode" below |
 
 ## Why it's built this way
@@ -167,6 +168,18 @@ of your English improving (or not) over time.
   hesitation sounds would blur two different habits together; counting them
   by eye each session is how the number stops being comparable. So
   `voxlib/discourse.py` counts them, on their own axis.
+- **A chance is not the same as a word.** Every rate here divides by reliable
+  words, which is only right if what is counted rises with words. On this
+  project's own record it does not — `voxlib/exposure.py` finds session totals
+  tracking *how many categories were being looked for* (+0.57) better than
+  anything said (-0.26), with the rate falling as sessions get longer (-0.59).
+  So `frames/` counts the opportunities directly: one regex per category,
+  matching a line where the structure came up at all, whether or not it went
+  wrong. It is a lexical proxy rather than a parsed one and it is stated as
+  such — what it buys is a series comparable with itself, which the per-word
+  rate demonstrably is not. Nothing is adopted on faith: both denominators are
+  scored over the same sessions and a frame is used only where it wins, so a
+  category with a bad frame and a category with no frame behave identically.
 - **Mistake counts are data, not prose.** `memory.md` is rewritten from its
   own previous text every session, which makes it a retelling of a retelling
   by the fourth one — patterns have already gone missing that way. The counts
