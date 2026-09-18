@@ -469,7 +469,9 @@ TEMPLATE = """<!DOCTYPE html>
           border-radius: 999px; padding: 0 6px; }
   .slate-why { font-size: 11.5px; color: var(--ink-2); margin-top: 5px; line-height: 1.5;
                max-width: 62ch; }
-  .slate-spark { min-width: 0; overflow: hidden; }
+  .slate-spark { min-width: 0; }
+  .slate-spark-line { overflow: hidden; }
+  .spark-dir { font-size: 10.5px; font-weight: 500; margin-top: 3px; text-align: center; }
   .slate-do { text-align: right; }
   .slate-action { font-size: 12px; font-weight: 500; }
   .slate-impact { font-size: 11px; color: var(--muted); margin-top: 2px;
@@ -1276,6 +1278,7 @@ document.getElementById("meta").textContent =
   // reading of one.
   const recent = MODEL.sessions.slice(-6).map((s) => s.clarity_rate).filter((v) => v !== null);
   let clarityNote = "";
+  let clarityWorse = null;
   if (recent.length >= 3) {
     // Counted in both directions rather than one subtracted from the other: a
     // session that did not move the rate is neither, and inferring the falls
@@ -1286,6 +1289,7 @@ document.getElementById("meta").textContent =
       else if (recent[i] < recent[i - 1]) down += 1;
     }
     const worse = up > down;
+    clarityWorse = worse;
     // The number printed has to be the number of the direction named. Printing
     // `up` under either label said "1 of the last 5 sessions moved it down" on
     // a stretch where one session moved it up and four moved it down.
@@ -1330,7 +1334,13 @@ document.getElementById("meta").textContent =
       el("div", { class: established ? "where-num" : "where-val", text: num(clarity) }),
       el("div", { class: "tile-note",
         text: "per 1,000 reliable words — the errors that cost the listener the meaning" }),
-      clarityNote ? el("div", { class: "where-move", text: clarityNote }) : null,
+      // Colour, not just an arrow: this is the first number on the page, and
+      // everywhere else on this page an up/down for an error rate is coloured
+      // --critical/--good. Left plain here, it was the one hero figure that
+      // didn't say at a glance whether it was good or bad news.
+      clarityNote ? el("div", { class: "where-move",
+        style: clarityWorse === null ? "" : `color: var(${clarityWorse ? "--critical" : "--good"})`,
+        text: clarityNote }) : null,
       // The all-categories rate is kept, demoted, and labelled — it is the
       // number that used to lead, and it can be green on a session the clarity
       // tier got worse in.
@@ -1523,22 +1533,30 @@ document.getElementById("meta").textContent =
     + "spread reads as the trend." }));
 
   const E = MODEL.exposure || {};
-  host.append(el("div", { class: "note", text:
-    `Sessions range from ${int(Math.min(...words))} to ${int(Math.max(...words))} reliable `
-    + "words, and every figure here divides by that. Whether it should is testable, and the "
-    + `answer on this history is: ${E.verdict || "not enough sessions to tell yet"}.`
-    + (E.within_category !== null && E.within_category !== undefined
-       ? ` Within a category, instances against words spoken correlate ${num(E.within_category)};`
-         + ` the rate against words spoken, ${num(E.rate_vs_words)}.` : "")
-    + (E.total_vs_categories !== null && E.total_vs_categories !== undefined
-       ? ` The session total tracks the number of categories being looked for`
-         + ` (${num(E.total_vs_categories)}) more closely than it tracks anything said,`
-         + " so the all-categories total is partly a measure of attention; the table view"
-         + " keeps the day-one cohort, which counts the same categories at both ends."
-       : "")
-    + (E.narrow ? ` Session lengths span only ${E.spread}× so far, narrow enough to hide a`
-                  + " real relationship — python -m voxlib.exposure re-runs this as more"
-                  + " sessions accumulate." : "") }));
+  // This is the statistical case FOR the chart above (why dividing by words is
+  // fair, or isn't), not a reading of what it shows — a first glance at "is my
+  // English improving" shouldn't have to clear a paragraph of correlation
+  // coefficients to get to the answer below. Collapsed, not deleted: the case
+  // still has to be checkable, just not mandatory reading on every visit.
+  host.append(el("details", {}, [
+    el("summary", { text: "Why divide by words spoken? (the statistical case)" }),
+    el("div", { class: "note", text:
+      `Sessions range from ${int(Math.min(...words))} to ${int(Math.max(...words))} reliable `
+      + "words, and every figure here divides by that. Whether it should is testable, and the "
+      + `answer on this history is: ${E.verdict || "not enough sessions to tell yet"}.`
+      + (E.within_category !== null && E.within_category !== undefined
+         ? ` Within a category, instances against words spoken correlate ${num(E.within_category)};`
+           + ` the rate against words spoken, ${num(E.rate_vs_words)}.` : "")
+      + (E.total_vs_categories !== null && E.total_vs_categories !== undefined
+         ? ` The session total tracks the number of categories being looked for`
+           + ` (${num(E.total_vs_categories)}) more closely than it tracks anything said,`
+           + " so the all-categories total is partly a measure of attention; the table view"
+           + " keeps the day-one cohort, which counts the same categories at both ends."
+         : "")
+      + (E.narrow ? ` Session lengths span only ${E.spread}× so far, narrow enough to hide a`
+                    + " real relationship — python -m voxlib.exposure re-runs this as more"
+                    + " sessions accumulate." : "") }),
+  ]));
   host.append(table);
 
   responsive(plot, (w) => lineChart(w, MODEL.sessions, series, {
@@ -1659,10 +1677,22 @@ document.getElementById("meta").textContent =
   const list = el("div", { class: "slate" });
   for (const target of slate) {
     const card = MODEL.categories.find((c) => c.category === target.category);
-    const spark = el("div", { class: "slate-spark" });
+    const spark = el("div", { class: "slate-spark-line" });
+    // A sibling, not a child of `spark`: responsive() clears spark's own
+    // children every time it redraws (e.g. once its real width is known after
+    // insertion), which would wipe anything appended inside it.
+    const sparkCol = el("div", { class: "slate-spark" }, [spark]);
     if (card) {
       const own = Math.max(...card.series.map((pt) => pt.rate || 0), 0.5);
       responsive(spark, (w) => sparkline(w, card, own, 30), 60);
+      // The line alone doesn't say whether its wiggle is good news: this is an
+      // error rate, so down is always the direction to want, but nothing next
+      // to the sparkline said so. DIRECTION already carries the colour used for
+      // exactly this elsewhere on the page (Start to now, speech deltas) — it
+      // just wasn't attached to a sparkline before.
+      const dir = DIRECTION[card.direction];
+      if (dir) sparkCol.append(el("div", { class: "spark-dir",
+        style: `color: var(${dir.token})`, text: dir.text }));
     }
     list.append(el("div", { class: "slate-row" }, [
       el("div", { class: "slate-main" }, [
@@ -1675,10 +1705,16 @@ document.getElementById("meta").textContent =
         ]),
         el("div", { class: "slate-why", text: target.why || target.state_label }),
       ]),
-      spark,
+      sparkCol,
       el("div", { class: "slate-do" }, [
         el("div", { class: "slate-action", text: target.action }),
-        el("div", { class: "slate-impact", text: `impact ${num(target.impact)}` }),
+        // Not a 0-10 score — it's the ranking weight that put this row here
+        // (severity × how often it's happening), so a bare number invites
+        // reading it as a grade. The order of the list already says "worse
+        // first"; the title spells out what moved it there for anyone who asks.
+        el("div", { class: "slate-impact", title: "Ranking weight: how severe this mistake is "
+          + "combined with how often it's happening lately. Higher sorts first in this list — "
+          + "it isn't a score out of 10.", text: `impact ${num(target.impact)}` }),
       ]),
     ]));
   }
