@@ -259,25 +259,25 @@ def loop_state(sessions: list[PracticeSession], recording_dates: list[str],
     train_days = _elapsed(trained[-1] if trained else None, today)
 
     measure = LoopSide(
-        key="measure", label="Measure", last=recorded[-1] if recorded else "",
+        key="measure", label="Recording", last=recorded[-1] if recorded else "",
         days=measure_days, state=_state(measure_days),
         detail=f"{len(recorded)} recording{'' if len(recorded) == 1 else 's'} analysed",
     )
     train = LoopSide(
-        key="train", label="Train", last=trained[-1] if trained else "",
+        key="train", label="Practice", last=trained[-1] if trained else "",
         days=train_days, state=_state(train_days),
-        detail=("no corrected repetition on record" if not trained else
-                f"{len(trained)} session{'' if len(trained) == 1 else 's'} with a repetition "
-                "in them"),
+        detail=("no practice with corrections yet" if not trained else
+                f"{len(trained)} practice session{'' if len(trained) == 1 else 's'} "
+                "with corrections"),
     )
     review_days = _elapsed(overdue[0][1] if overdue else None, today)
     review = LoopSide(
-        key="review", label="Review", last=overdue[0][1] if overdue else "",
+        key="review", label="Reviews", last=overdue[0][1] if overdue else "",
         days=review_days,
         # An empty schedule is nothing to be late for, not a late thing.
         state="ok" if not overdue else _state(review_days),
         detail=("nothing overdue" if not overdue else
-                f"{len(overdue)} overdue, oldest {overdue[0][0]}"),
+                f"{len(overdue)} overdue, oldest: {overdue[0][0]}"),
     )
 
     return LoopState(

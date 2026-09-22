@@ -257,6 +257,10 @@ TEMPLATE = """<!DOCTYPE html>
   details { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
   summary { font-size: 12px; color: var(--ink-2); cursor: pointer; }
   summary:hover { color: var(--ink); }
+  /* Folded-away reasoning: present for anyone who asks, quiet for everyone else. */
+  details.how { border-top: none; padding-top: 0; margin-top: 6px; }
+  details.how summary { font-size: 11.5px; color: var(--muted); }
+  details.how .note { max-width: 76ch; }
 
   /* An open card takes the whole grid row: at a third of the width its notes
      wrap to a very short measure, and its two neighbours stretch to match a
@@ -411,21 +415,32 @@ TEMPLATE = """<!DOCTYPE html>
 
   /* Where you are */
   .where { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; }
-  .where > div:first-child { flex: 1 1 280px; }
+  .where-level { flex: 1 1 280px; }
   .where-metric { flex: 1 1 300px; }
   /* Before the level is established the measurement leads and the level
      follows, so the first thing read is a number rather than its absence. */
   .where[data-established="false"] { flex-direction: row-reverse;
                                      justify-content: flex-end; }
-  .where[data-established="false"] > div:first-child { flex: 0 1 280px; }
+  .where[data-established="false"] > .where-level { flex: 0 1 280px; }
   .where-val { font-size: 40px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
   .where-sub { color: var(--ink-2); font-size: 13px; margin-top: 8px; }
-  .where-gap { font-size: 12px; color: var(--ink-2); margin-top: 14px; line-height: 1.55;
-               max-width: 44ch; }
+  .gap-head { font-size: 12px; font-weight: 600; margin-top: 18px; }
+  .gaps { display: grid; gap: 12px; margin-top: 8px; max-width: 420px; }
+  .gap-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px;
+             font-size: 12.5px;
+             margin-bottom: 5px; }
+  .gap-name { font-weight: 500; }
+  .gap-nums { color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .gap-note { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
   .where-num { font-size: 32px; font-weight: 600; line-height: 1.1; margin-top: 2px; }
   .where-move { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
-  .where-alt { font-size: 11.5px; color: var(--muted); margin-top: 14px; line-height: 1.5;
-               max-width: 52ch; border-top: 1px solid var(--border); padding-top: 10px; }
+
+  /* Summary */
+  .verdict { list-style: none; margin: 0 0 26px; padding: 0; display: grid; gap: 8px; }
+  .verdict li { display: flex; gap: 10px; align-items: baseline; font-size: 15px;
+                line-height: 1.45; }
+  .verdict li[data-tone="next"] { font-weight: 600; }
+  .verdict-mark { flex: none; width: 1em; text-align: center; font-weight: 600; }
 
   /* The one thing to do */
   .lead { border-left: 3px solid var(--series-1); padding: 2px 0 2px 14px; }
@@ -462,11 +477,12 @@ TEMPLATE = """<!DOCTYPE html>
   .slate-name { font-size: 13.5px; font-weight: 600; color: var(--ink);
                 text-decoration: none; }
   .slate-name:hover { color: var(--series-1); }
-  .slate-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-  .tier { font-size: 10.5px; color: var(--muted); }
-  .tier-clarity { color: var(--series-2); }
-  .flag { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border);
-          border-radius: 999px; padding: 0 6px; }
+  .slate-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .slate-state { font-size: 12.5px; margin-top: 4px; }
+  .slate-main .ex { margin-top: 6px; }
+  .tier { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border);
+          border-radius: 999px; padding: 0 7px; }
+  .tier-clarity { color: var(--series-2); border-color: var(--series-2); }
   .slate-why { font-size: 11.5px; color: var(--ink-2); margin-top: 5px; line-height: 1.5;
                max-width: 62ch; }
   .slate-spark { min-width: 0; }
@@ -474,8 +490,6 @@ TEMPLATE = """<!DOCTYPE html>
   .spark-dir { font-size: 10.5px; font-weight: 500; margin-top: 3px; text-align: center; }
   .slate-do { text-align: right; }
   .slate-action { font-size: 12px; font-weight: 500; }
-  .slate-impact { font-size: 11px; color: var(--muted); margin-top: 2px;
-                  font-variant-numeric: tabular-nums; }
 
   /* Since you looked */
   .since-line { font-size: 15px; font-weight: 500; }
@@ -570,9 +584,9 @@ TEMPLATE = """<!DOCTYPE html>
   <nav class="sections" id="nav" aria-label="Sections"></nav>
 
   <div id="now" role="tabpanel" aria-labelledby="view-now">
-    <section class="card loopcard" id="loop"></section>
     <section class="card" id="headline"></section>
     <section class="card" id="actions"></section>
+    <section class="card loopcard" id="loop"></section>
     <section class="card" id="since" hidden></section>
     <section class="card" id="trend"></section>
     <section class="card" id="focus"></section>
@@ -599,22 +613,22 @@ TEMPLATE = """<!DOCTYPE html>
 const MODEL = JSON.parse(document.getElementById("model").textContent);
 
 const SECTION_LABELS = {
-  loop: "The loop",
-  headline: "Where you are",
+  loop: "Your routine",
+  headline: "Summary",
   actions: "Do this next",
   since: "Since you looked",
-  trend: "Is it working?",
-  focus: "Focus",
-  working: "What's working",
-  level: "Level detail",
-  patterns: "Every pattern",
-  chances: "Chances",
+  trend: "Am I improving?",
+  focus: "Mistakes to work on",
+  working: "Going well",
+  level: "Level details",
+  patterns: "Every mistake",
+  chances: "Mistakes vs. chances",
   heatmap: "Session by session",
-  speech: "How it was spoken",
+  speech: "How you spoke",
   asking: "Asking questions",
-  askpatterns: "Question patterns",
+  askpatterns: "Question habits",
   vocabulary: "Words to retire",
-  quality: "Reliability",
+  quality: "Recording quality",
   timeline: "Timeline",
   about: "About this page",
 };
@@ -623,12 +637,47 @@ const SECTION_LABELS = {
 // readable at session 12 and at session 300 — and everything that grows without
 // limit lives in Evidence, which is navigated rather than scrolled past.
 const VIEWS = {
-  now: ["loop", "headline", "actions", "since", "trend", "focus", "working"],
+  now: ["headline", "actions", "loop", "since", "trend", "focus", "working"],
   evidence: ["level", "patterns", "chances", "heatmap", "speech", "asking",
              "askpatterns", "vocabulary", "quality", "timeline", "about"],
 };
 
+// The level's measures as the Now view names them. The Evidence view's level
+// panel keeps the level module's own labels, with the note that explains each.
+const PLAIN_MEASURES = {
+  clarity: { label: "Serious mistakes", unit: "per 1,000 words",
+             note: "Mistakes where a listener can lose your meaning. Lower is better." },
+  polish: { label: "Minor mistakes", unit: "per 1,000 words",
+            note: "Understood straight away, just not natural-sounding. Only counts from "
+              + "B2.1 up. Lower is better." },
+  fillers: { label: "Um / uh sounds", unit: "per 100 words",
+             note: "The transcriber misses some, so the real number is a bit higher. "
+               + "Lower is better." },
+  markers: { label: "“You know”, “I mean” and similar", unit: "per 100 words",
+             note: "Filler phrases. Lower is better." },
+  mattr: { label: "Variety of words", unit: "(score)",
+           note: "How varied your words are within any stretch of speech. Higher is better." },
+  novelty: { label: "Words you hadn't used in your last 3 recordings",
+             unit: "per 1,000 words",
+             note: "Whether your vocabulary is still growing. Higher is better." },
+  scenarios: { label: "Question-practice goals met", unit: "(share)",
+               note: "From question practice in the last 30 days. Higher is better." },
+};
+
+// How each recording was processed, as it reads in a table.
+const MODE_WORDS = {
+  diarization: "with others", solo: "solo", backfill: "older (no timing)",
+};
+const modeText = (mode) => MODE_WORDS[mode] || mode || "—";
+
 /* ---------- helpers ---------- */
+// The reasoning behind a section, kept but folded away: the first thing a
+// section says should be what it shows, not the case for how it was counted.
+function how(text, label = "How is this measured?") {
+  return el("details", { class: "how" }, [
+    el("summary", { text: label }), el("div", { class: "note", text }),
+  ]);
+}
 const NS = "http://www.w3.org/2000/svg";
 const num = (v, d = 2) => v === null || v === undefined ? "\\u2014" : v.toFixed(d);
 // Same number without the trailing zeros a fixed precision adds.
@@ -671,9 +720,8 @@ const TABLE_ROWS = 12;
 function moreRows(host, total, shown, what) {
   if (total <= shown) return;
   host.append(el("div", { class: "note", text:
-    `Showing the ${shown} most recent of ${total} ${what}. The rest are in `
-    + "analysis/, which is where they have always been \u2014 this page is for the "
-    + "readings, not the archive." }));
+    `Showing the ${shown} most recent of ${total} ${what}. The older ones are still `
+    + "in the analysis/ folder." }));
 }
 
 // Carry each column's header onto its cells, so the narrow-screen card layout
@@ -957,7 +1005,6 @@ function heatGrid(model) {
   const cells = [];
   for (const cat of model.categories) {
     const label = el("div", { class: "heat-label", title: cat.category }, [
-      el("span", { class: "sev", text: `s${cat.severity}` }),
       el("span", { class: "nm", text: cat.category }),
     ]);
     grid.append(label);
@@ -1033,8 +1080,8 @@ function heatGrid(model) {
 function heatTable(model) {
   const table = el("table");
   table.append(el("caption", { text:
-    "Rate per 1,000 reliable words. \\u201c0\\u201d = the structure came up and was right; "
-    + "\\u201c\\u2014\\u201d = it never came up, so nothing was measured." }));
+    "Mistakes per 1,000 words. \\u201c0\\u201d = it came up and you got it right; "
+    + "\\u201c\\u2014\\u201d = it didn't come up in that recording." }));
   const head = el("tr", {}, [el("th", { text: "Mistake" })]);
   for (const d of model.dates) head.append(el("th", { text: tinyDate(d) }));
   table.append(el("thead", {}, [head]));
@@ -1166,13 +1213,13 @@ function noteBlock(note) {
 }
 
 const DIRECTION = {
-  improving: { token: "--good", text: "improving" },
-  worsening: { token: "--critical", text: "worsening" },
-  steady: { token: "--muted", text: "steady" },
-  "n/a": { token: "--muted", text: "too few sessions" },
+  improving: { token: "--good", text: "getting better" },
+  worsening: { token: "--critical", text: "getting worse" },
+  steady: { token: "--muted", text: "no change" },
+  "n/a": { token: "--muted", text: "too early to tell" },
   // The rate moved, but on these counts the move cannot be told from chance.
   // Colouring it green or red would be picking a side of a coin flip.
-  "not separable yet": { token: "--muted", text: "too few instances to tell" },
+  "not separable yet": { token: "--muted", text: "too early to tell" },
 };
 
 function patternDetail(cat) {
@@ -1187,25 +1234,27 @@ function patternDetail(cat) {
   body.append(plot);
   responsive(plot, (w) => sparkline(w, cat, own, 96));
   body.append(el("div", { class: "detail", style: "margin-top:2px",
-    text: `scaled to this pattern's own range, 0 to ${num(own)} per 1,000 words` }));
+    text: `mistakes per 1,000 words in each recording (chart goes from 0 to ${num(own)})` }));
 
   const stat = (label, value) => el("div", {}, [
     el("div", { class: "k", text: label }), el("div", { class: "v", text: value }),
   ]);
   const stats = el("div", { class: "mstats" }, [
-    stat("Latest rate", cat.latest_rate === null ? "not measured"
-      : num(cat.latest_rate) + (cat.latest_count ? ` (${cat.latest_count} instances)` : "")),
-    stat("Impact", num(cat.impact)),
-    stat("Tier", `severity ${cat.severity} \u00b7 ${cat.tier}`),
-    stat("Recency-weighted rate", num(cat.weighted_rate)),
-    stat("Measured in", `${cat.sessions_measured} of `
-      + `${cat.series.filter((p) => p.state !== "before").length} sessions`),
+    stat("Last recording", cat.latest_rate === null ? "didn't come up"
+      : `${cat.latest_count || 0} time${cat.latest_count === 1 ? "" : "s"} · `
+        + `${num(cat.latest_rate)} per 1,000 words`),
+    stat("How serious", `${cat.tier === "clarity" ? "serious" : "minor"} `
+      + `(${cat.severity} of 5)`),
+    stat("Importance", num(cat.impact)),
+    stat("Recent average", `${num(cat.weighted_rate)} per 1,000 words`),
+    stat("Came up in", `${cat.sessions_measured} of `
+      + `${cat.series.filter((p) => p.state !== "before").length} recordings`),
     stat("First seen", cat.first_seen),
     stat("Last seen", cat.last_seen || "never"),
   ]);
   if (cat.drill) {
-    stats.append(stat("Drill blocks", `${cat.drill.attempts}, last ${cat.drill.last_date}`));
-    stats.append(stat("Drill accuracy", cat.drill.accuracy === null ? "\u2014"
+    stats.append(stat("Drills done", `${cat.drill.attempts}, last ${cat.drill.last_date}`));
+    stats.append(stat("Right in drills", cat.drill.accuracy === null ? "\u2014"
       : `${Math.round(cat.drill.accuracy * 100)}% `
         + `(${cat.drill.correct}/${cat.drill.attempted})`));
   }
@@ -1213,7 +1262,7 @@ function patternDetail(cat) {
 
   if (cat.note) body.append(noteBlock(cat.note));
   body.append(el("a", { class: "permalink", href: `#${cat.slug}`,
-                        text: "\u00b6 link to this pattern" }));
+                        text: "\u00b6 link to this mistake" }));
   return body;
 }
 </script>
@@ -1224,20 +1273,32 @@ document.getElementById("meta").textContent =
   `${H.sessions} sessions \\u00b7 ${H.first_date} \\u2192 ${H.last_date} `
   + `\\u00b7 built ${MODEL.generated_full}`;
 
-/* the loop — is the machine that improves this actually running? */
+/* the routine — is the part that improves anything actually happening? */
 (() => {
   const host = document.getElementById("loop");
   const L = MODEL.loop;
   if (!L || !L.sides) { host.hidden = true; return; }
 
   const WORDS = {
-    ok: "running", warn: "behind", stale: "stopped", never: "never started",
+    ok: "on track", warn: "slipping", stale: "stopped", never: "not started",
   };
+  host.append(el("div", { class: "card-head" }, [
+    el("div", {}, [
+      el("h2", { text: "Your routine" }),
+      el("div", { class: "sub", text:
+        "Recording shows where you are. Practice with corrections is what actually "
+        + "improves it, and reviews keep old fixes from slipping back." }),
+    ]),
+  ]));
   const strip = el("div", { class: "loop" });
   for (const side of L.sides) {
-    const elapsed = side.days === null ? "—"
+    const ago = side.days === null ? null
       : side.days === 0 ? "today"
       : `${side.days} day${side.days === 1 ? "" : "s"} ago`;
+    // The review side's date is when the oldest review fell due, not when a
+    // review last happened, so the same "N days ago" would say the wrong thing.
+    const when = ago === null ? "—"
+      : side.key === "review" ? `due ${ago}` : `last: ${ago}`;
     strip.append(el("div", { class: "loop-side", "data-state": side.state }, [
       el("div", { class: "loop-head" }, [
         // Never colour alone: the state is in the word as well as the dot.
@@ -1245,109 +1306,117 @@ document.getElementById("meta").textContent =
         el("span", { class: "loop-label", text: side.label }),
         el("span", { class: "loop-state", text: WORDS[side.state] }),
       ]),
-      el("div", { class: "loop-when", text: elapsed }),
+      el("div", { class: "loop-when", text: when }),
       el("div", { class: "loop-detail", text: side.detail }),
     ]));
   }
   host.append(strip);
 
-  const notes = [];
-  if (L.instrument_ahead) notes.push(
-    `${L.recordings_in_window} recording(s) and ${L.sessions_in_window} practice session(s) `
-    + `in the last ${L.window_days} days, with ${L.repetitions_in_window} corrected `
-    + "repetition(s) in them. The recording measures and only the repetitions train "
-    + "(rule 19), so more recordings do not improve the measurement — they consume the "
-    + "time the practice needed.");
+  // "Recording more than practising" is the first item in Do this next whenever
+  // it applies, so it is not repeated here.
   const cad = L.cadence || {};
-  if (cad.direction === "lengthening") notes.push(
-    `Recordings are getting further apart: every ${cad.median} days across the record, `
-    + `every ${cad.recent} lately.`);
-  if (notes.length) host.append(el("div", { class: "loop-note", text: notes.join(" ") }));
+  if (cad.direction === "lengthening") host.append(el("div", { class: "loop-note", text:
+    `You're recording less often lately: every ${cad.recent} days, compared with every `
+    + `${cad.median} days overall.` }));
 })();
 
-/* where you are */
+/* summary and level */
 (() => {
   const host = document.getElementById("headline");
-  const G = MODEL.level_gap || {};
   const cur = MODEL.level.current || {};
   const clarity = MODEL.sessions.length
     ? MODEL.sessions[MODEL.sessions.length - 1].clarity_rate : null;
 
-  // How the clarity tier has moved over the sessions the eye can hold, counted
-  // rather than described: "up in 4 of the last 5" is a fact, "rising" is a
-  // reading of one.
+  host.append(el("div", { class: "card-head" }, [el("h2", { text: "Summary" })]));
+  const TONE = {
+    good: ["▼", "--good"], bad: ["▲", "--critical"],
+    neutral: ["=", "--muted"], next: ["→", "--series-1"],
+  };
+  if ((MODEL.verdict || []).length) host.append(el("ul", { class: "verdict" },
+    MODEL.verdict.map((line) => {
+      const [mark, token] = TONE[line.tone] || TONE.neutral;
+      return el("li", { "data-tone": line.tone }, [
+        el("span", { class: "verdict-mark", style: `color: var(${token})`, text: mark }),
+        el("span", { text: line.text }),
+      ]);
+    })));
+
+  // How the serious-mistake rate has moved over the last few recordings,
+  // counted rather than described: "up in 3 of the last 5" is a fact, "rising"
+  // is a reading of one.
   const recent = MODEL.sessions.slice(-6).map((s) => s.clarity_rate).filter((v) => v !== null);
   let clarityNote = "";
   let clarityWorse = null;
   if (recent.length >= 3) {
     // Counted in both directions rather than one subtracted from the other: a
-    // session that did not move the rate is neither, and inferring the falls
-    // from the rises would quietly report those as falls.
+    // session that did not move the rate is neither.
     let up = 0, down = 0;
     for (let i = 1; i < recent.length; i += 1) {
       if (recent[i] > recent[i - 1]) up += 1;
       else if (recent[i] < recent[i - 1]) down += 1;
     }
-    const worse = up > down;
-    clarityWorse = worse;
-    // The number printed has to be the number of the direction named. Printing
-    // `up` under either label said "1 of the last 5 sessions moved it down" on
-    // a stretch where one session moved it up and four moved it down.
-    const moved = worse ? up : down;
+    clarityWorse = up > down;
+    const moved = clarityWorse ? up : down;
     const steps = recent.length - 1;
-    clarityNote = `${worse ? "▲" : "▼"} ${moved} of the last ${steps} `
-      + `session${steps === 1 ? "" : "s"} moved it ${worse ? "up" : "down"}`;
+    clarityNote = `${clarityWorse ? "▲ went up" : "▼ went down"} in ${moved} of the last `
+      + `${steps} recording${steps === 1 ? "" : "s"}`;
   }
 
-  // A level needs three qualifying sessions before it says anything, and until
-  // then the largest element on the page was the words "not yet established" —
-  // a new reader's first impression being a statement of absence. Below that
-  // bar the two swap places: the clarity rate is a real measurement from the
-  // first session, and the level waits its turn in small type.
+  // The rung is deliberately slow — three qualifying sessions — so on its own
+  // it is the same word every week. What is still missing for the next one is
+  // the part that moves, and the part anything can be done about.
+  const target = MODEL.level.target;
+  const unmet = [];
+  for (const dim of MODEL.level.dimensions || [])
+    for (const m of dim.measures) if (m.met === false) unmet.push(m);
+  unmet.sort((a, b) => (b.progress || 0) - (a.progress || 0));
+
   const established = cur.index !== null && cur.index !== undefined;
+  const levelSide = el("div", { class: "where-level" }, [
+    el("div", { class: "where-val", text: cur.label || "—" }),
+    el("div", { class: "where-sub", text: !established
+      ? `Your speaking level needs ${MODEL.level.promotion_sessions} recordings before it `
+        + `can be named — ${MODEL.sessions.length} so far.`
+      : "your speaking level" + (target ? ` · next: ${target.label}` : "") }),
+  ]);
+  if (established && target) {
+    if (unmet.length) {
+      levelSide.append(el("div", { class: "gap-head", text: `What's left for ${target.label}` }));
+      const list = el("div", { class: "gaps" });
+      for (const m of unmet) {
+        const plain = PLAIN_MEASURES[m.key] || { label: m.label, unit: m.unit };
+        const pct = Math.floor((m.progress || 0) * 100);
+        list.append(el("div", { class: "gap" }, [
+          el("div", { class: "gap-top" }, [
+            el("span", { class: "gap-name", text: plain.label }),
+            el("span", { class: "gap-nums", text:
+              `${trim(m.value)} → ${m.lower_is_better ? "at most" : "at least"} `
+              + `${trim(m.threshold)} ${plain.unit}` }),
+          ]),
+          el("div", { class: "meter" }, [el("i", { style: `width:${pct}%` })]),
+          el("div", { class: "gap-note", text: pct >= 97 ? "almost there"
+            : `${pct}% of the way · ${m.lower_is_better ? "lower" : "higher"} is better` }),
+        ]));
+      }
+      levelSide.append(list);
+    } else {
+      levelSide.append(el("div", { class: "gap-note", text:
+        `Every measure is at ${target.label} level in your last recording. It needs `
+        + `${MODEL.level.promotion_sessions} recordings in a row like that to move up.` }));
+    }
+  }
+
   host.append(el("div", { class: "where", "data-established": String(established) }, [
-    el("div", {}, [
-      el("div", { class: established ? "where-val" : "where-sub",
-                  text: cur.label || H.cefr || "—" }),
-      el("div", { class: "where-sub", text: !established
-        ? `spoken level — the scale needs ${MODEL.level.promotion_sessions} qualifying `
-          + `sessions before it will name one, and there are ${MODEL.sessions.length}`
-        : `spoken level · rung ${cur.index + 1} of ${MODEL.level.scale.length}`
-          + (MODEL.level.target ? ` · next is ${MODEL.level.target.label}` : "") }),
-      // The rung is deliberately slow — three qualifying sessions — so on its own
-      // it is the same word every week. The nearest unmet threshold is the part
-      // that moves, and the part anything can be done about.
-      G.measure ? el("div", { class: "where-gap" }, [
-        el("span", { text: "Closest to " }),
-        el("b", { text: G.target }),
-        el("span", { text: `: ${G.measure.toLowerCase()} at ` }),
-        el("b", { text: trim(G.value) }),
-        el("span", { text: `, needs ${G.lower_is_better ? "≤" : "≥"} `
-          + `${trim(G.threshold)} — ${Math.round(G.progress * 100)}% of the way` }),
-        el("div", { class: "meter", style: "margin-top:7px;max-width:220px" }, [
-          el("i", { style: `width:${Math.round(G.progress * 100)}%` }),
-        ]),
-      ]) : null,
-    ]),
+    levelSide,
     el("div", { class: "where-metric" }, [
-      el("div", { class: "tile-label", text: "Clarity-tier errors" }),
-      el("div", { class: established ? "where-num" : "where-val", text: num(clarity) }),
-      el("div", { class: "tile-note",
-        text: "per 1,000 reliable words — the errors that cost the listener the meaning" }),
-      // Colour, not just an arrow: this is the first number on the page, and
-      // everywhere else on this page an up/down for an error rate is coloured
-      // --critical/--good. Left plain here, it was the one hero figure that
-      // didn't say at a glance whether it was good or bad news.
+      el("div", { class: "tile-label", text: "Serious mistakes, last recording" }),
+      el("div", { class: "where-num", text: num(clarity) }),
+      el("div", { class: "tile-note", text:
+        "per 1,000 words · lower is better. These are the ones where a listener can lose "
+        + "your meaning." }),
       clarityNote ? el("div", { class: "where-move",
         style: clarityWorse === null ? "" : `color: var(${clarityWorse ? "--critical" : "--good"})`,
         text: clarityNote }) : null,
-      // The all-categories rate is kept, demoted, and labelled — it is the
-      // number that used to lead, and it can be green on a session the clarity
-      // tier got worse in.
-      el("div", { class: "where-alt", text:
-        `All tracked categories: ${num(H.rate)} per 1,000 on ${H.rate_date}. `
-        + "That total rises as coaching finds new patterns, so it is not comparable "
-        + "with itself over months — the chart below has the series that is." }),
     ]),
   ]));
 })();
@@ -1356,15 +1425,7 @@ document.getElementById("meta").textContent =
 (() => {
   const host = document.getElementById("actions");
   if (!MODEL.actions.length) { host.hidden = true; return; }
-  host.append(el("div", { class: "card-head" }, [
-    el("div", {}, [
-      el("h2", { text: "Do this next" }),
-      el("div", { class: "sub", text:
-        "Nothing new here — this is the crossing of the rung a pattern fails on, its "
-        + "impact ranking and what the schedule says is late, which otherwise means reading "
-        + "three sections against each other. Every line says where it came from." }),
-    ]),
-  ]));
+  host.append(el("div", { class: "card-head" }, [el("h2", { text: "Do this next" })]));
 
   // The first one is drawn differently on purpose. Rule 20: at conversational
   // speed the number of things anyone can consciously monitor is one, so a list
@@ -1372,9 +1433,7 @@ document.getElementById("meta").textContent =
   // glanced at, not carried.
   const [first, ...rest] = MODEL.actions;
   host.append(el("div", { class: "lead", "data-blocking": String(!!first.blocking) }, [
-    el("div", { class: "lead-eyebrow",
-      text: first.blocking ? "Before anything below this means much"
-                           : "One thing, not five" }),
+    el("div", { class: "lead-eyebrow", text: first.blocking ? "Do this first" : "Most important" }),
     el("div", { class: "lead-title", text: first.title }),
     el("div", { class: "lead-detail", text: first.detail }),
     el("a", { class: "action-link", href: `#${first.anchor}`,
@@ -1383,7 +1442,7 @@ document.getElementById("meta").textContent =
 
   if (!rest.length) return;
   const more = el("details", { class: "more" }, [
-    el("summary", { text: `${rest.length} more, in priority order` }),
+    el("summary", { text: `${rest.length} more, most important first` }),
   ]);
   const list = el("div", { class: "actions" });
   rest.forEach((action, index) => {
@@ -1424,13 +1483,12 @@ document.getElementById("meta").textContent =
     el("div", {}, [
       el("h2", { text: "Since you last looked" }),
       el("div", { class: "sub", text: `${days} day${days === 1 ? "" : "s"} ago, `
-        + `on ${seen}. This block is the only thing on the page your browser remembers; `
-        + "it never leaves this device." }),
+        + `on ${seen}. Only your browser remembers this.` }),
     ]),
   ]));
 
   const bits = [];
-  if (fresh.length) bits.push(`${fresh.length} session${fresh.length === 1 ? "" : "s"} analysed`);
+  if (fresh.length) bits.push(`${fresh.length} recording${fresh.length === 1 ? "" : "s"} analysed`);
   if (practice.length) bits.push(`${practice.length} practice day${practice.length === 1 ? "" : "s"}`);
   host.append(el("div", { class: "since-line", text: bits.join(" · ") }));
 
@@ -1440,7 +1498,7 @@ document.getElementById("meta").textContent =
     return points.length && points.some((pt) => pt.rate > 0);
   }).slice(0, 4);
   if (moved.length) host.append(el("div", { class: "note", text:
-    "Seen again since then: " + moved.map((c) => c.category).join(", ") }));
+    "Mistakes that came up again: " + moved.map((c) => c.category).join(", ") }));
 })();
 
 /* trend */
@@ -1452,15 +1510,15 @@ document.getElementById("meta").textContent =
   // what decides whether the speaker is getting easier to understand.
   const series = [
     { key: "clarity_rate", token: "--series-2",
-      label: "clarity tier — costs the listener the meaning" },
+      label: "Serious mistakes (a listener can lose your meaning)" },
     { key: "polish_rate", token: "--series-1",
-      label: "polish tier — understood, just not native" },
+      label: "Minor mistakes (understood, but not natural-sounding)" },
     // Promoted out of the table view, where it was a column of numbers nobody
     // opened. It is the one series on this page that is comparable end to end:
     // the others grow as coaching finds categories, this one counts the same
     // five at both ends.
     { key: "cohort_rate", token: "--hollow", dashed: true,
-      label: "day-one categories — the comparable one" },
+      label: "Same checklist as day one (the fair comparison)" },
   ];
   const words = MODEL.sessions.map((s) => s.reliable_words).filter(Boolean);
   const plot = el("div", { class: "plot" });
@@ -1469,13 +1527,12 @@ document.getElementById("meta").textContent =
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "Is it working?" }),
+      el("h2", { text: "Am I improving?" }),
       el("div", { class: "sub", text:
-        "Occurrences per 1,000 reliable words, against what was actually trained. Read the "
-        + "orange line first: those are the errors that cost a listener the meaning. The "
-        + "grey line is the day-one categories \u2014 the only set counted the same way at "
-        + "both ends of the history, and so the only one that can answer \u201cam I better "
-        + "than when I started\u201d. Marks below the axis are drills and practice "
+        "Mistakes per 1,000 words in each recording. Lower is better. Watch the orange "
+        + "line most: those are the mistakes that cost you the most. The dashed grey line "
+        + "only counts the mistakes tracked since your first recording, so it's the "
+        + "honest before-and-after. The marks under the chart are drills and practice "
         + "sessions." }),
     ]),
     toggle,
@@ -1492,7 +1549,7 @@ document.getElementById("meta").textContent =
     el("div", { class: "legend", style: "margin:12px 0 2px" }, [
       el("div", { class: "legend-item" }, [
         el("span", { class: "key-box", style: "background: var(--quality)" }),
-        el("span", { text: "share of words whisper was unsure of \\u2014 taller is worse" }),
+        el("span", { text: "how much of each recording the transcriber wasn't sure of (taller = less reliable)" }),
       ]),
     ]),
     (() => {
@@ -1512,7 +1569,7 @@ document.getElementById("meta").textContent =
           { value: q && q.line_share !== null ? `${Math.round(q.line_share * 100)}%` : "\\u2014",
             name: "of lines \\u2014 the weaker reading" },
           { value: int(s.reliable_words), name: "reliable words" },
-          { value: s.mode || "\\u2014", name: "run mode" },
+          { value: modeText(s.mode), name: "recording type" },
         ];
         const show = (ev) => showTip(ev.clientX ?? 0, ev.clientY ?? 0, s.date, rows);
         cell.addEventListener("pointermove", show);
@@ -1527,10 +1584,9 @@ document.getElementById("meta").textContent =
     })(),
   ]));
   if (MODEL.sessions.length > SMOOTH_ABOVE) chartSide.append(el("div", { class: "note", text:
-    `Over ${SMOOTH_ABOVE} sessions, so the bold lines are a ${SMOOTH_WINDOW}-session rolling `
-    + "mean and the faint ones behind them are the sessions themselves. Each single session "
-    + "is a handful of events in a couple of thousand words; drawn alone at this length the "
-    + "spread reads as the trend." }));
+    `The bold lines are an average of ${SMOOTH_WINDOW} recordings at a time; the faint `
+    + "lines behind them are the single recordings, which jump around too much to read "
+    + "on their own." }));
 
   const E = MODEL.exposure || {};
   // This is the statistical case FOR the chart above (why dividing by words is
@@ -1538,8 +1594,8 @@ document.getElementById("meta").textContent =
   // English improving" shouldn't have to clear a paragraph of correlation
   // coefficients to get to the answer below. Collapsed, not deleted: the case
   // still has to be checkable, just not mandatory reading on every visit.
-  host.append(el("details", {}, [
-    el("summary", { text: "Why divide by words spoken? (the statistical case)" }),
+  host.append(el("details", { class: "how" }, [
+    el("summary", { text: "How is this measured?" }),
     el("div", { class: "note", text:
       `Sessions range from ${int(Math.min(...words))} to ${int(Math.max(...words))} reliable `
       + "words, and every figure here divides by that. Whether it should is testable, and the "
@@ -1562,10 +1618,10 @@ document.getElementById("meta").textContent =
   responsive(plot, (w) => lineChart(w, MODEL.sessions, series, {
     events: MODEL.treatment || [],
     extraRows: (d) => [
-      { value: num(d.rate), name: "both tiers together" },
-      { value: `${d.clarity_count} + ${d.polish_count}`, name: "instances, clarity + polish" },
-      { value: int(d.reliable_words), name: "reliable words" },
-      { value: String(d.categories_tracked), name: "categories tracked" },
+      { value: num(d.rate), name: "serious and minor together" },
+      { value: `${d.clarity_count} + ${d.polish_count}`, name: "mistakes, serious + minor" },
+      { value: int(d.reliable_words), name: "clearly transcribed words" },
+      { value: String(d.categories_tracked), name: "mistake types tracked" },
     ],
   }));
 
@@ -1578,11 +1634,11 @@ document.getElementById("meta").textContent =
       table.dataset.built = "1";
       const t = el("table");
       t.append(el("thead", {}, [el("tr", {}, [
-        el("th", { text: "Session" }), el("th", { text: "Clarity" }),
-        el("th", { text: "Polish" }), el("th", { text: "All tracked" }),
-        el("th", { text: "Day-one categories" }), el("th", { text: "Occurrences" }),
-        el("th", { text: "Reliable words" }), el("th", { text: "Categories" }),
-        el("th", { text: "Low-confidence lines" }),
+        el("th", { text: "Recording" }), el("th", { text: "Serious" }),
+        el("th", { text: "Minor" }), el("th", { text: "Everything tracked" }),
+        el("th", { text: "Day-one checklist" }), el("th", { text: "Mistakes" }),
+        el("th", { text: "Clear words" }), el("th", { text: "Mistake types" }),
+        el("th", { text: "Unclear lines" }),
       ])]));
       const body = el("tbody");
       for (const s of MODEL.sessions) body.append(el("tr", {}, [
@@ -1607,9 +1663,8 @@ document.getElementById("meta").textContent =
   const P = MODEL.progress || {};
   if (!P.comparable) {
     host.append(el("div", { class: "note", text:
-      `Two windows of ${P.window || 3} sessions are needed before a start-to-now comparison `
-      + `means anything; there ${P.sessions === 1 ? "is" : "are"} ${P.sessions || 0} session`
-      + `${P.sessions === 1 ? "" : "s"} on record.` }));
+      `Then vs now needs at least ${(P.window || 3) * 2} recordings; `
+      + `there ${P.sessions === 1 ? "is" : "are"} ${P.sessions || 0} so far.` }));
     return;
   }
 
@@ -1629,22 +1684,22 @@ document.getElementById("meta").textContent =
       el("div", { class: "cmp-verdict",
         style: known ? `color: var(${s.better ? "--good" : "--critical"})` : "" },
         [el("span", { text: !known ? "—"
-          : `${s.better ? "▼" : "▲"} ${num(Math.abs(s.change))}` })]),
+          : `${s.better ? "▼" : "▲"} ${num(Math.abs(s.change))} ${s.better ? "better" : "worse"}` })]),
     ]));
   }
 
   host.append(el("div", { class: "cmp-wrap" }, [
-    el("h3", { class: "sub-h", text: "Start to now" }),
+    el("h3", { class: "sub-h", text: "Then vs now" }),
     el("div", { class: "sub", text:
-      `First ${P.window} sessions (from ${P.from_date}) against the last ${P.window} `
-      + `(to ${P.to_date}) — ${P.days} days. Lower is better in every row.` }),
+      `Your first ${P.window} recordings (from ${P.from_date}) against your last ${P.window} `
+      + `(to ${P.to_date}), ${P.days} days apart. Mistakes per 1,000 words, so lower is better.` }),
     rows,
     el("div", { class: "note", text:
-      "The level over the same stretch: " + (P.level_moved
+      "Your level over the same time: " + (P.level_moved
         ? `${P.level_from} → ${P.level_to}.`
-        : `${P.level_to} throughout — it needs three qualifying sessions to move, which `
-          + "is right for a level and useless as weekly feedback. The closest unmet "
-          + "threshold at the top of the page is the part that changes.") }),
+        : `${P.level_to} the whole time. It only moves after several recordings in a row at `
+          + "the next level, so the “What's left” list at the top is where to see "
+          + "week-to-week progress.") }),
   ]));
 })();
 
@@ -1656,23 +1711,15 @@ document.getElementById("meta").textContent =
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "Focus" }),
+      el("h2", { text: "Mistakes to work on" }),
+      // Rule 17's portfolio, said as what it does for the reader.
       el("div", { class: "sub", text:
-        `${slate.length} of ${MODEL.categories.length} tracked patterns, chosen as a `
-        + "portfolio rather than a top-five of one number: at least two from the clarity "
-        + "tier, at most two from polish. A very frequent survivable error would otherwise "
-        + "own every slot and crowd out what a listener actually loses." }),
+        `The ${slate.length} to focus on now, most important first, out of `
+        + `${MODEL.categories.length} being tracked. At least two are serious mistakes, `
+        + "so a frequent but minor one can't push them off the list." }),
     ]),
-    el("a", { class: "action-link", href: "#patterns", text: "All patterns →" }),
+    el("a", { class: "action-link", href: "#patterns", text: "All mistakes →" }),
   ]));
-
-  const FLAGS = {
-    stalled: ["!", "no better than three measured sessions ago"],
-    thin: ["?", "ranked on fewer than five instances in total"],
-    overdue: ["●", "past its review date"],
-    frozen: ["❄", "no chance to make it lately — its absence streak is frozen"],
-    "not-separable": ["~", "moved, but not beyond what chance would move it"],
-  };
 
   const list = el("div", { class: "slate" });
   for (const target of slate) {
@@ -1685,36 +1732,27 @@ document.getElementById("meta").textContent =
     if (card) {
       const own = Math.max(...card.series.map((pt) => pt.rate || 0), 0.5);
       responsive(spark, (w) => sparkline(w, card, own, 30), 60);
-      // The line alone doesn't say whether its wiggle is good news: this is an
-      // error rate, so down is always the direction to want, but nothing next
-      // to the sparkline said so. DIRECTION already carries the colour used for
-      // exactly this elsewhere on the page (Start to now, speech deltas) — it
-      // just wasn't attached to a sparkline before.
+      // An error rate, so down is always the direction to want — the word and
+      // its colour say which way this one is going.
       const dir = DIRECTION[card.direction];
       if (dir) sparkCol.append(el("div", { class: "spark-dir",
         style: `color: var(${dir.token})`, text: dir.text }));
     }
+    const examples = card && card.note ? card.note.examples : [];
+    const latest = examples.length ? examples[examples.length - 1] : null;
     list.append(el("div", { class: "slate-row" }, [
       el("div", { class: "slate-main" }, [
-        el("a", { class: "slate-name", href: `#${target.slug}`, text: target.category }),
-        el("div", { class: "slate-flags" }, [
-          el("span", { class: `tier tier-${target.tier}`,
-                       text: `${target.tier} · severity ${target.severity}` }),
-          ...target.flags.map((f) => el("span", { class: "flag", title: (FLAGS[f] || ["", f])[1],
-                                                  text: (FLAGS[f] || ["?", f])[0] + " " + f })),
+        el("div", { class: "slate-title" }, [
+          el("a", { class: "slate-name", href: `#${target.slug}`, text: target.category }),
+          el("span", { class: `tier tier-${target.tier}`, text: target.plain_tier }),
         ]),
-        el("div", { class: "slate-why", text: target.why || target.state_label }),
+        el("div", { class: "slate-state", text: target.plain_state }),
+        latest ? example({ wrong: latest.wrong, right: latest.right }) : null,
+        target.plain_why ? el("div", { class: "slate-why", text: target.plain_why }) : null,
       ]),
       sparkCol,
       el("div", { class: "slate-do" }, [
-        el("div", { class: "slate-action", text: target.action }),
-        // Not a 0-10 score — it's the ranking weight that put this row here
-        // (severity × how often it's happening), so a bare number invites
-        // reading it as a grade. The order of the list already says "worse
-        // first"; the title spells out what moved it there for anyone who asks.
-        el("div", { class: "slate-impact", title: "Ranking weight: how severe this mistake is "
-          + "combined with how often it's happening lately. Higher sorts first in this list — "
-          + "it isn't a score out of 10.", text: `impact ${num(target.impact)}` }),
+        el("div", { class: "slate-action", text: target.plain_action }),
       ]),
     ]));
   }
@@ -1735,9 +1773,8 @@ document.getElementById("meta").textContent =
   // was trying to change. `show()` does it on first reveal, when there is a
   // width to measure.
   const chart = el("div", {}, [scroller, el("div", { class: "heat-small", text:
-    `${MODEL.categories.length} patterns across ${MODEL.dates.length} sessions. The grid is `
-    + "one column per session and does not shrink to a phone \u2014 the same evidence, "
-    + "ranked and with the diagnosis attached, is in Focus and in Every pattern." })]);
+    `${MODEL.categories.length} mistakes across ${MODEL.dates.length} recordings, most `
+    + "important at the top. On a phone, Every mistake shows the same thing in a list." })]);
   const table = el("div", { hidden: "" }, [heatTable(MODEL)]);
   const toggle = el("button", { class: "ghost", type: "button", text: "Table view" });
   toggle.addEventListener("click", () => {
@@ -1748,17 +1785,15 @@ document.getElementById("meta").textContent =
   });
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "Every tracked mistake, session by session" }),
-      el("div", { class: "sub", text:
-        "Ranked by impact. A hollow cell means the structure never came up that session, so "
-        + "nothing was measured \\u2014 it is not a clean session." }),
+      el("h2", { text: "Session by session" }),
+      el("div", { class: "sub", text: "Each square is one mistake in one recording. Darker means more; an empty outline means it didn't come up that time, which is not the same as getting it right." }),
     ]),
     toggle,
   ]));
   const legend = el("div", { class: "legend" });
   legend.append(el("div", { class: "legend-item" }, [
     el("span", { class: "key-box", style: "background: var(--heat-0)" }),
-    el("span", { text: "clean (0)" }),
+    el("span", { text: "none (0)" }),
   ]));
   for (const bin of BINS) legend.append(el("div", { class: "legend-item" }, [
     el("span", { class: "key-box", style: `background: var(${bin.token})` }),
@@ -1767,11 +1802,11 @@ document.getElementById("meta").textContent =
   legend.append(el("div", { class: "legend-item" }, [
     el("span", { class: "key-box",
                  style: "background: var(--heat-3); opacity: 0.45" }),
-    el("span", { text: `≤ ${THIN_EVIDENCE} instances — too few to read` }),
+    el("span", { text: `${THIN_EVIDENCE} or fewer — too few to judge` }),
   ]));
   legend.append(el("div", { class: "legend-item" }, [
     el("span", { class: "key-box", style: "box-shadow: inset 0 0 0 1px var(--hollow)" }),
-    el("span", { text: "never came up" }),
+    el("span", { text: "didn't come up" }),
   ]));
   chart.prepend(legend);          // the colour scale belongs to the grid, not the card
   host.append(chart);
@@ -1818,38 +1853,38 @@ function barList(items, { max, label, value, tip }) {
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
       el("h2", { text: "Asking questions" }),
-      el("div", { class: "sub", text:
-        "The half of this project a recording cannot measure. Whether a question was well "
+      el("div", { class: "sub", text: "Results from question practice, where you have to ask your way out of a situation. Your recordings can't measure this, so it has its own scores." }),
+      how("The half of this project a recording cannot measure. Whether a question was well "
         + "asked is not in a transcript \\u2014 it needs a situation, a reply that withholds "
         + "something, and criteria written in advance \\u2014 so nothing here has an "
         + "unmonitored-speech rung, and every score is small enough that it is shown next to "
-        + "the number it divides." }),
+        + "the number it divides."),
     ]),
   ]));
 
   /* the headline numbers */
   const tiles = el("div", { class: "tiles", style: "margin-bottom:22px" }, [
     el("div", {}, [
-      el("div", { class: "tile-label", text: "Scenario criteria met" }),
+      el("div", { class: "tile-label", text: "Goals met in scenarios" }),
       el("div", { class: "tile-val", text: share(A.totals.met, A.totals.total) }),
       el("div", { class: "tile-note",
         text: `${A.totals.met} of ${A.totals.total} across ${A.totals.runs} runs` }),
     ]),
     el("div", {}, [
-      el("div", { class: "tile-label", text: "By session" }),
+      el("div", { class: "tile-label", text: "Session by session" }),
       el("div", { class: "tile-val",
         text: A.by_date.map((d) => `${d.met}/${d.total}`).join(" \\u2192 ") || "\\u2014" }),
       el("div", { class: "tile-note",
         text: A.by_date.map((d) => d.date.slice(5)).join(" \\u2192 ") }),
     ]),
     el("div", {}, [
-      el("div", { class: "tile-label", text: "Warm-up drill items tried" }),
+      el("div", { class: "tile-label", text: "Warm-up drill questions answered" }),
       el("div", { class: "tile-val",
         text: `${A.drill_totals.attempted} of ${A.drill_totals.items}` }),
       el("div", { class: "tile-note", text: "too few to score" }),
     ]),
     el("div", {}, [
-      el("div", { class: "tile-label", text: "Typed words in this mode" }),
+      el("div", { class: "tile-label", text: "Words typed in question practice" }),
       el("div", { class: "tile-val", text: int(A.practice_totals.words) }),
       el("div", { class: "tile-note",
         text: `${A.practice_totals.sessions} sessions, `
@@ -1860,11 +1895,11 @@ function barList(items, { max, label, value, tip }) {
 
   /* which criteria fail, across scenarios */
   if (A.criteria.length) {
-    host.append(el("h3", { text: "Which criteria fail",
+    host.append(el("h3", { text: "Which goals you miss most",
       style: "font-size:13px;font-weight:600;margin:4px 0 4px" }));
     host.append(el("div", { class: "sub", style: "margin-bottom:10px", text:
-      "The one dimension with repeats \\u2014 the same criterion failing across different "
-      + "situations is a pattern rather than a property of one of them." }));
+      "The same goal missed in different situations is a habit worth working on, not a "
+      + "one-off." }));
     host.append(barList(A.criteria, {
       label: (c) => c.criterion,
       value: (c) => c.count,
@@ -1878,7 +1913,7 @@ function barList(items, { max, label, value, tip }) {
   const runs = el("table");
   runs.append(el("thead", {}, [el("tr", {}, [
     el("th", { text: "Date" }), el("th", { class: "rung", text: "Scenario" }),
-    el("th", { class: "rung", text: "Register" }), el("th", { class: "rung", text: "Function" }),
+    el("th", { class: "rung", text: "Who with" }), el("th", { class: "rung", text: "Goal" }),
     el("th", { text: "Score" }), el("th", { class: "where", text: "Failed" }),
   ])]));
   const runBody = el("tbody");
@@ -1904,10 +1939,8 @@ function barList(items, { max, label, value, tip }) {
 
   const groupable = [...A.registers, ...A.functions].filter((g) => g.enough);
   if (!groupable.length) host.append(el("div", { class: "note", text:
-    `${A.totals.runs} runs across ${A.registers.length} registers and ${A.functions.length} `
-    + "functions \\u2014 close to one run each, so neither is aggregated into a score here. "
-    + `${A.min_runs_to_group} runs in a group is the minimum for the number to mean anything; `
-    + "until then the per-run table above is the whole of the evidence." }));
+    `${A.totals.runs} scenarios so far, nearly all different, so there's no average per `
+    + `type yet. That needs at least ${A.min_runs_to_group} of the same kind.` }));
 
   /* the warm-up drills */
   if (A.drills.length) {
@@ -1937,10 +1970,9 @@ function barList(items, { max, label, value, tip }) {
     t.append(body);
     host.append(el("div", { class: "table-wrap" }, [t]));
     host.append(el("div", { class: "note", text:
-      `${A.drill_totals.attempted} of ${A.drill_totals.items} items offered have ever been `
-      + "answered: one block ended early and the next was skipped by request. There is no "
-      + "accuracy to report here \\u2014 the number in the Correct column is out of Attempted, "
-      + "not out of Offered." }));
+      `${A.drill_totals.attempted} of ${A.drill_totals.items} questions offered have been `
+      + "answered, which is too few for a score. \\u201cCorrect\\u201d is out of the ones "
+      + "answered." }));
   }
 
   /* typed dialogue in this mode */
@@ -1951,7 +1983,7 @@ function barList(items, { max, label, value, tip }) {
     t.append(el("thead", {}, [el("tr", {}, [
       el("th", { text: "Date" }), el("th", { class: "rung", text: "Focus" }),
       el("th", { text: "Words" }), el("th", { text: "Errors" }),
-      el("th", { text: "Per 1,000" }), el("th", { text: "Re-productions" }),
+      el("th", { text: "Per 1,000" }), el("th", { text: "Repeated correctly" }),
     ])]));
     const body = el("tbody");
     for (const s of A.practice) {
@@ -1971,11 +2003,8 @@ function barList(items, { max, label, value, tip }) {
     t.append(body);
     host.append(el("div", { class: "table-wrap" }, [t]));
     host.append(el("div", { class: "note", text:
-      "Words and errors are this mode's only, never pooled with conversation practice: an "
-      + "asking session contributes words to the denominator while giving most grammar "
-      + "categories no chance to appear. \\u201cRe-productions\\u201d counts the corrections "
-      + "that landed; the column recording the ones asked for and missed was added after the "
-      + "earliest sessions here, so those read as none rather than as unmeasured." }));
+      "Question practice only; conversation practice is counted separately. "
+      + "\\u201cRepeated correctly\\u201d counts the corrections you then said right." }));
   }
 })();
 
@@ -1989,10 +2018,8 @@ function barList(items, { max, label, value, tip }) {
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "Question patterns being tracked" }),
-      el("div", { class: "sub", text:
-        "asking_memory.md, by hand \\u2014 the counterpart of memory.md for a skill the "
-        + "recording cannot see." }),
+      el("h2", { text: "Question habits" }),
+      el("div", { class: "sub", text: "The mistakes you tend to make when asking questions, and whether they're getting better." }),
     ]),
   ]));
 
@@ -2027,12 +2054,12 @@ function barList(items, { max, label, value, tip }) {
   }
 
   if (A.provisional.length) {
-    host.append(el("h3", { text: "Untracked forms",
+    host.append(el("h3", { text: "New mistakes to watch",
       style: "font-size:13px;font-weight:600;margin:26px 0 8px" }));
     host.append(el("div", { class: "sub", style: "margin-bottom:10px", text:
-      `Corrected in a session but covered by no category yet. Seen in `
-      + `${A.promote_after} separate sessions it stops being a slip and earns a category `
-      + "name and a drill of its own." }));
+      `Mistakes corrected in practice that don't have a name on the list yet. Once one `
+      + `shows up in ${A.promote_after} separate sessions, it gets added to the list and `
+      + "gets its own drill." }));
     const t = el("table");
     t.append(el("thead", {}, [el("tr", {}, [
       el("th", { text: "Form" }), el("th", { text: "Sessions" }), el("th", { text: "Times" }),
@@ -2045,7 +2072,7 @@ function barList(items, { max, label, value, tip }) {
         el("td", { text: String(f.sessions) }),
         el("td", { text: String(f.total) }),
         el("td", { text: f.last_seen }),
-        el("td", { class: "where", text: f.ready ? "give it a category and a drill" : "" }),
+        el("td", { class: "where", text: f.ready ? "ready to add to the list" : "" }),
       ]));
     }
     t.append(body);
@@ -2054,7 +2081,7 @@ function barList(items, { max, label, value, tip }) {
 
   if (A.register_notes.length) {
     const notes = el("details", {}, [
-      el("summary", { text: `Register notes (${A.register_notes.length})` }),
+      el("summary", { text: `Notes on tone and politeness (${A.register_notes.length})` }),
     ]);
     for (const note of A.register_notes)
       notes.append(el("div", { class: "note", style: "margin-top:8px", text: note }));
@@ -2134,12 +2161,12 @@ function smallLine(width, points, decimals) {
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
       el("h2", { text: "Words to retire" }),
-      el("div", { class: "sub", text:
-        "memory.md carries a table of phrases to stop using and what to say instead. It is "
+      el("div", { class: "sub", text: "Words and phrases you overuse, and whether you're really saying them less. Falling is good." }),
+      how("memory.md carries a table of phrases to stop using and what to say instead. It is "
         + "written every session and read every session, and nothing ever checked it \\u2014 "
         + "a standing instruction with no feedback loop, which is the kind of advice that "
         + "can be wrong for months without anyone noticing. Counted here over the reliable "
-        + "lines of every archived session, worst first." }),
+        + "lines of every archived session, worst first."),
     ]),
   ]));
 
@@ -2157,9 +2184,9 @@ function smallLine(width, points, decimals) {
   for (const row of V.rows) {
     const move = MOVE[row.movement] || MOVE.level;
     const detail = row.replacements.length
-      ? "instead: " + row.replacements
+      ? "try instead: " + row.replacements
           .map((r) => `${r.phrase} (${r.total}×, ${r.movement})`).join(", ")
-      : "no replacement from the table has been said yet";
+      : "you haven't used any of the suggested replacements yet";
     const block = el("div", { class: "vrow" }, [
       el("div", {}, [
         el("div", { class: "vphrase", text: row.phrase }),
@@ -2188,13 +2215,12 @@ function smallLine(width, points, decimals) {
 
   const notes = [];
   if (V.never_said.length) notes.push(
-    `${V.never_said.length} entries in the table have never appeared in an archived `
-    + `session: ${V.never_said.slice(0, 4).join(", ")}`
+    `${V.never_said.length} phrase${V.never_said.length === 1 ? "" : "s"} on the list `
+    + `never came up in any recording: ${V.never_said.slice(0, 4).join(", ")}`
     + (V.never_said.length > 4 ? ", …" : "") + ".");
-  notes.push("A count cannot tell a word used well from one leaned on \\u2014 a phrase can "
-    + "be on the list for being vague rather than forbidden. Read it as a prompt to look. "
-    + "Counts are on word boundaries over reliable lines only, so “cool” does not "
-    + "collect “cooling”.");
+  notes.push("A count can't tell a word used well from one leaned on, so treat this as a "
+    + "prompt to notice, not a ban. Only whole words count: \\u201ccool\\u201d doesn't "
+    + "match \\u201ccooling\\u201d.");
   host.append(el("div", { class: "note", text: notes.join(" ") }));
 })();
 
@@ -2206,10 +2232,10 @@ function smallLine(width, points, decimals) {
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "How it was spoken" }),
-      el("div", { class: "sub", text:
-        "Pace, hesitation and pauses \\u2014 measured over the reliable lines only, the same "
-        + "population the grammar analysis uses." }),
+      el("h2", { text: "How you spoke" }),
+      el("div", { class: "sub", text: "Speaking pace, filler sounds and pauses in each recording. For fillers and pauses, lower is better." }),
+      how("Pace, hesitation and pauses \\u2014 measured over the reliable lines only, the same "
+        + "population the grammar analysis uses."),
     ]),
   ]));
 
@@ -2235,13 +2261,10 @@ function smallLine(width, points, decimals) {
     ],
   }));
   host.append(el("div", { class: "note", text:
-    "Two lines because words per minute is measured against two different denominators, and "
-    + "they are not comparable. Diarization hands over VAD-tight turns; without it whisper's "
-    + "own segments swallow the pauses inside them \\u2014 the same speaker at the same speed "
-    + "reads far faster one way than the other. The two recording modes alternate through "
-    + "this history, so the honest chart is two series with gaps rather than one line with a "
-    + `step in it. ${S.pace.unmeasured} backfilled session(s) are absent: they were counted `
-    + "from an archived transcript, with no clock to measure time against." }));
+    "Two separate lines because pace is measured differently in solo recordings and in "
+    + "recordings with other people, so the two can't be compared with each other."
+    + (S.pace.unmeasured ? ` ${S.pace.unmeasured} older recording(s) had no timing and are `
+       + "left out." : "") }));
 
   /* the small multiples */
   host.append(el("h3", { text: "Hesitation and pauses",
@@ -2277,9 +2300,8 @@ function smallLine(width, points, decimals) {
   }
   host.append(grid);
   if (S.metrics.some((m) => m.solo_only)) host.append(el("div", { class: "note", text:
-    "The two pause measures are blank for the diarized sessions by design, not by accident: "
-    + "in a recording with another voice in it the gap between two of your lines is mostly "
-    + "the other person talking, so the same number would mean two different things." }));
+    "Pauses are only measured in solo recordings: with other people, the gap between your "
+    + "sentences is mostly them talking." }));
 })();
 
 /* ---------- how reliable each session was ---------- */
@@ -2291,30 +2313,29 @@ function smallLine(width, points, decimals) {
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "How reliable each session was" }),
-      el("div", { class: "sub", text:
-        "Input quality, not speaking quality: high values mean the microphone, not the "
+      el("h2", { text: "Recording quality" }),
+      el("div", { class: "sub", text: "How much of each recording the transcriber heard clearly. When a lot is unclear, that recording's numbers are less trustworthy. This is about the microphone, not your English." }),
+      how("Input quality, not speaking quality: high values mean the microphone, not the "
         + "speaker. It belongs here rather than in the charts above because when it moves, "
         + "every number on this page changes meaning \\u2014 a session that lost a quarter of "
-        + "its words is a weaker measurement of all of them." }),
+        + "its words is a weaker measurement of all of them."),
     ]),
   ]));
 
   host.append(el("div", { class: "notice", text: S.any_unreliable
-    ? `At least one session is at or above the ${pct(S.warn_share)} word-share mark where `
-      + "the pipeline stops treating it as comparable. Check the mic before reading anything "
-      + "into that session's fluency."
-    : `No session on record reaches the ${pct(S.warn_share)} word-share mark where the `
-      + "pipeline warns that a session is not comparable. Read by line the numbers look far "
-      + "worse, but that mostly counts two-word replies, which is why the word share is the "
-      + "one to act on." }));
+    ? `At least one recording had ${pct(S.warn_share)} or more of its words unclear, which `
+      + "makes it hard to compare with the others. Check the microphone before reading much "
+      + "into it."
+    : `No recording had ${pct(S.warn_share)} or more of its words unclear, so all of them `
+      + "can be compared. Counted by line it looks worse, but that's mostly short replies "
+      + "like \\u201cYeah.\\u201d" }));
 
   const table = el("table");
   table.append(el("thead", {}, [el("tr", {}, [
     el("th", { text: "Session" }), el("th", { class: "rung", text: "Mode" }),
     el("th", { text: "Files" }), el("th", { text: "Lines" }),
-    el("th", { text: "Low-conf. lines" }), el("th", { class: "rung", text: "Words lost" }),
-    el("th", { text: "Reliable words" }), el("th", { text: "Speech" }),
+    el("th", { text: "Unclear lines" }), el("th", { class: "rung", text: "Unclear words" }),
+    el("th", { text: "Clear words" }), el("th", { text: "Speaking time" }),
   ])]));
   const body = el("tbody");
   // Newest first. The reason this table exists is "is the session I just
@@ -2330,7 +2351,7 @@ function smallLine(width, points, decimals) {
     ]);
     body.append(el("tr", {}, [
       el("th", { scope: "row", text: q.date }),
-      el("td", { class: "rung", text: q.mode || "\\u2014" }),
+      el("td", { class: "rung", text: modeText(q.mode) }),
       el("td", { text: q.files === null ? "\\u2014" : String(q.files) }),
       el("td", { text: int(q.total_lines) }),
       el("td", { text: `${int(q.low_confidence_lines)} \\u00b7 ${pct(q.line_share)}` }),
@@ -2345,8 +2366,8 @@ function smallLine(width, points, decimals) {
   }
   table.append(body);
   table.append(el("caption", { text:
-    "\\u201cWords lost\\u201d is the share of words whisper was unsure of \\u2014 the reading "
-    + "the pipeline acts on. The tick marks the threshold at which it warns." }));
+    "\\u201cUnclear words\\u201d is the share of words the transcriber wasn't sure of. The "
+    + "tick marks the point where a recording stops being comparable." }));
   host.append(el("div", { class: "table-wrap" }, [table]));
   moreRows(host, S.sessions.length, recent.length, "recorded sessions");
 })();
@@ -2358,68 +2379,68 @@ function smallLine(width, points, decimals) {
   if (!L.rows.length) { host.hidden = true; return; }
   const byCategory = new Map(MODEL.categories.map((c) => [c.category, c]));
 
+  // Short on purpose: the state above it already says why.
   const ACTIONS = {
-    "retiring": "Move it to Improvements in memory.md",
-    "no-drill": "Write a drill",
-    "thin-evidence": "Drill it again — one item is not a score",
-    "form-unreliable": "Keep drilling until the form is reliable",
-    "automaticity-gap": "More drilling will not fix this — produce it in dialogue",
-    "clean": "Watch it — one clean session is not a streak",
+    "retiring": "Take it off the list",
+    "no-drill": "Write a drill for it",
+    "thin-evidence": "Drill it again",
+    "form-unreliable": "Keep drilling it",
+    "automaticity-gap": "Practise it in conversation",
+    "clean": "Keep an eye on it",
   };
+  const TIER = { clarity: "serious", polish: "minor" };
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "What to work on" }),
-      el("div", { class: "sub", text:
-        "Ranked by impact — severity × √(recency-weighted rate), the ranking "
+      el("h2", { text: "Every mistake" }),
+      el("div", { class: "sub", text: "Every tracked mistake, most important first. Each is checked in drills, in practice chat and in real speech, and where it breaks tells you what to do. Open a row for examples and notes." }),
+      how("Ranked by impact — severity × √(recency-weighted rate), the ranking "
         + "python -m voxlib.mistakes prints, so the page and the CLI always agree. Three "
         + "files measure three different things about the same mistake, and the rung a row "
         + "fails on says what to do about it: a form drilled to 100% that still appears in "
         + "every recording is not a knowledge problem. Open a row for its trend, its worked "
-        + "examples and its notes." }),
+        + "examples and its notes."),
     ]),
   ]));
 
   host.append(el("div", { class: "rungs" }, [
     el("div", { class: "rung-def" }, [
-      el("b", { text: "1 · Knows the form" }),
-      el("span", { text: "drills.csv — the only score here with a real denominator. "
-        + "Blocked means the pattern was named; mixed means it had to be noticed." }),
+      el("b", { text: "1 · In drills" }),
+      el("span", { text: "Do you get it right when you know you're being tested? "
+        + "“Told the rule” means the drill said which rule; “mixed” means you had to spot it." }),
     ]),
     el("div", { class: "rung-def" }, [
-      el("b", { text: "2 · Produces it when attending" }),
-      el("span", { text: "practice_history.csv — typed dialogue, errors per 1,000 words "
-        + "the owner produced." }),
+      el("b", { text: "2 · In practice chat" }),
+      el("span", { text: "Typed conversation practice, while you're paying attention. "
+        + "Mistakes per 1,000 words you typed." }),
     ]),
     el("div", { class: "rung-def" }, [
-      el("b", { text: "3 · Produces it unmonitored" }),
-      el("span", { text: "mistakes.csv — the recording, per 1,000 reliable words. The "
-        + "only rung that measures speech." }),
+      el("b", { text: "3 · In real speech" }),
+      el("span", { text: "Your recordings, when you're not thinking about it. Mistakes "
+        + "per 1,000 words. This is the one that counts." }),
     ]),
   ]));
 
   if (!L.attended_sessions) host.append(el("div", { class: "notice", text:
-    `Rung 2 has no measurements. All ${L.asking_sessions} recorded practice sessions were `
-    + "question practice (mode “ask”); conversation practice — the mode that "
-    + "drills these grammar categories in dialogue — has never been recorded, so nothing "
-    + "bridges the drill and the recording. Grammar errors logged during question practice "
-    + "are shown as a count, not a rate: those sessions add words to the denominator without "
-    + "giving most of these categories a chance to appear." }));
+    `Column 2 is empty: all ${L.asking_sessions} practice sessions so far were question `
+    + "practice, and none was conversation practice, which is the one that works on these "
+    + "grammar mistakes. Mistakes that came up during question practice are shown as a "
+    + "count, not a rate, because those sessions give most of these mistakes no chance "
+    + "to appear." }));
 
   if (L.states["no-drill"]) host.append(el("div", { class: "notice", text:
-    `${L.states["no-drill"]} of the ${L.rows.length} tracked mistakes have no drill, so `
-    + "rungs 1 and 2 cannot be measured for them at all — the only evidence on record "
-    + "is what the recording caught. A drill is the cheapest way to find out whether one of "
-    + "them is a knowledge gap or an automaticity gap; drills/README.txt has the format." }));
+    `${L.states["no-drill"]} of the ${L.rows.length} tracked mistakes have no drill yet, so `
+    + "only your recordings say anything about them. A drill is the quickest way to find "
+    + "out whether you don't know the rule, or know it and slip when speaking." }));
 
   /* ---- controls: the state filter and the sort, in one row ---- */
   const order = Object.keys(L.state_labels).filter((k) => L.states[k]);
   let active = null;
   const bar = el("div", { class: "chipbar" });
   const sort = el("select", { id: "sort-by" }, [
-    el("option", { value: "impact", text: "impact" }),
-    el("option", { value: "latest", text: "latest rate" }),
-    el("option", { value: "severity", text: "severity" }),
+    el("option", { value: "impact", text: "importance" }),
+    el("option", { value: "latest", text: "latest recording" }),
+    el("option", { value: "severity", text: "how serious" }),
     el("option", { value: "recent", text: "most recently seen" }),
     el("option", { value: "due", text: "next due" }),
     el("option", { value: "name", text: "name" }),
@@ -2442,11 +2463,11 @@ function smallLine(width, points, decimals) {
 
   const rungOne = (r) => {
     const d = r.drill;
-    if (!d || !d.attempted) return cell(null, "never drilled");
+    if (!d || !d.attempted) return cell(null, "no drill yet");
     const pct = `${Math.round(d.accuracy * 100)}% (${d.correct}/${d.attempted})`;
-    const detail = `blocked ${d.blocked.correct}/${d.blocked.attempted}`
+    const detail = `told the rule ${d.blocked.correct}/${d.blocked.attempted}`
       + ` · mixed ${d.mixed.correct}/${d.mixed.attempted}`;
-    if (d.attempted < 5) return cell("--warning", pct, `${detail} — too few to tell`);
+    if (d.attempted < 5) return cell("--warning", pct, `${detail} — too few to judge`);
     return cell(d.accuracy >= 0.8 ? "--good" : "--critical", pct, detail);
   };
 
@@ -2461,11 +2482,12 @@ function smallLine(width, points, decimals) {
 
   const rungThree = (r) => {
     if (r.speech_rate === null || r.speech_rate === undefined)
-      return cell(null, "not measured", `untested ×${r.untested_since}`);
+      return cell(null, "didn't come up",
+                  `not in the last ${r.untested_since} recording${r.untested_since === 1 ? "" : "s"}`);
     const detail = r.absence_streak
-      ? `clean ×${r.absence_streak} running`
+      ? `none in the last ${r.absence_streak} recording${r.absence_streak === 1 ? "" : "s"}`
       : `${DIRECTION[r.direction] ? DIRECTION[r.direction].text : r.direction}`
-        + `${r.stalled ? " · stalled" : ""}`;
+        + `${r.stalled ? " · not improving" : ""}`;
     // The count beside the rate: a rate on its own hides whether it rests on
     // one instance or twenty.
     const shown = num(r.speech_rate)
@@ -2489,8 +2511,8 @@ function smallLine(width, points, decimals) {
     toggle.append(el("span", { class: "caret", text: open ? "▼" : "▶" }));
     const name = el("div", {}, [
       el("div", { class: "pname" }, [
-        el("span", { class: "sev", text: `s${r.severity} ` }),
         el("span", { text: r.category }),
+        el("span", { class: `tier tier-${r.tier}`, text: TIER[r.tier] || r.tier }),
       ]),
     ]);
     // The most recent worked example stays visible without opening anything —
@@ -2572,11 +2594,11 @@ function smallLine(width, points, decimals) {
     const t = el("table");
     t.append(el("thead", {}, [el("tr", {}, [
       el("th", { text: `Mistake (${rows.length})` }),
-      el("th", { class: "rung", text: "1 · Knows the form" }),
-      el("th", { class: "rung", text: "2 · Attending" }),
-      el("th", { class: "rung", text: "3 · Unmonitored" }),
-      el("th", { text: "Next due" }),
-      el("th", { class: "where", text: "Where it breaks" }),
+      el("th", { class: "rung", text: "1 · In drills" }),
+      el("th", { class: "rung", text: "2 · In practice chat" }),
+      el("th", { class: "rung", text: "3 · In real speech" }),
+      el("th", { text: "Next review" }),
+      el("th", { class: "where", text: "What to do" }),
     ])]));
     const body = el("tbody");
     for (const r of rows) for (const node of row(r)) body.append(node);
@@ -2590,7 +2612,7 @@ function smallLine(width, points, decimals) {
   for (const key of [null, ...order]) {
     const b = el("button", { class: "state", type: "button" }, [
       el("span", { class: "count", text: String(key ? L.states[key] : L.rows.length) }),
-      el("span", { text: key ? L.state_labels[key] : "all patterns" }),
+      el("span", { text: key ? L.state_labels[key] : "all mistakes" }),
     ]);
     b.addEventListener("click", () => {
       active = active === key ? null : key;
@@ -2604,7 +2626,7 @@ function smallLine(width, points, decimals) {
   host.append(el("div", { class: "controls" }, [
     el("label", { htmlFor: "sort-by", text: "Sort by" }), sort,
     el("label", { htmlFor: "hide-clean" },
-       [hide, el("span", { text: " Hide the ones ready to retire" })]),
+       [hide, el("span", { text: " Hide the fixed ones" })]),
   ]));
   host.append(table);
 
@@ -2639,13 +2661,12 @@ function smallLine(width, points, decimals) {
   if (L.dialogue_only.length) {
     const list = el("div", { class: "note" });
     list.append(el("div", { text:
-      "On the practice schedule but absent from the table above, because the recording "
-      + "cannot measure them — question-asking is not a grammar category, so these have "
-      + "no rung 3:" }));
+      "Also on your review schedule, but not in the table because recordings can't "
+      + "measure them (they're about asking questions, not grammar):" }));
     for (const d of L.dialogue_only) {
       list.append(el("div", { style: "margin-top:6px" }, [
-        el("span", { text: `${d.category} — last drilled ${d.last_drilled}, streak `
-          + `${d.streak}, due ` }),
+        el("span", { text: `${d.category} — last practised ${d.last_drilled}, `
+          + `${d.streak} right in a row, next review ` }),
         el("span", { class: d.overdue ? "overdue" : null,
                      text: d.overdue ? `${d.next_due} (overdue)` : d.next_due }),
       ]));
@@ -2661,11 +2682,9 @@ function smallLine(width, points, decimals) {
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "What's working" }),
+      el("h2", { text: "Going well" }),
       el("div", { class: "sub", text:
-        "The counterpart of the list above, and nothing on it is rounded in a flattering "
-        + "direction: every line is a measurement that moved the right way, and the block "
-        + "does not appear at all when none did." }),
+        "Only things that really improved. Nothing here is rounded up to look better." }),
     ]),
   ]));
 
@@ -2759,7 +2778,7 @@ function levelChart(width, L) {
       { color: css("--series-2"), value: r.rung_label, name: "this session alone" },
     ];
     if (r.blockers.length) rows_.push({ value: r.blockers.join(", "), name: "held back by" });
-    if (!r.reliable) rows_.push({ value: "not comparable", name: "too many words lost" });
+    if (!r.reliable) rows_.push({ value: "not comparable", name: "too many unclear words" });
     const show = (ev) => {
       hair.setAttribute("x1", x(i)); hair.setAttribute("x2", x(i));
       hair.setAttribute("opacity", 1);
@@ -2787,38 +2806,39 @@ function levelChart(width, L) {
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "Level" }),
-      el("div", { class: "sub", text:
-        "A CEFR band is about a year wide, which makes it useless as weekly feedback \\u2014 "
+      el("h2", { text: "Level details" }),
+      el("div", { class: "sub", text: "Your level is worked out from four areas, each with a target for the next level. Green means that target is reached." }),
+      how("A CEFR band is about a year wide, which makes it useless as weekly feedback \\u2014 "
         + "scores_history.csv has recorded the same letter for every session so far. This "
         + "cuts the band into rungs and earns each one against explicit thresholds, so the "
         + "same history always gives the same answer. It is calibrated against your own "
-        + "record: a rung on your line, not an exam result." }),
+        + "record: a rung on your line, not an exam result."),
     ]),
   ]));
 
   host.append(el("div", { class: "lvl-head" }, [
     el("div", {}, [
       el("div", { class: "lvl-val", text: cur.label }),
-      el("div", { class: "lvl-note", text: cur.index === null ? "not yet established"
-        : `rung ${cur.index + 1} of ${L.scale.length}`
-          + (L.target ? ` \\u00b7 next is ${L.target.label}` : "")
+      el("div", { class: "lvl-note", text: cur.index === null ? "not named yet"
+        : `step ${cur.index + 1} of ${L.scale.length}`
+          + (L.target ? ` \\u00b7 next: ${L.target.label}` : "")
           + (cur.session_label !== cur.label
-             ? ` \\u00b7 this session alone reads ${cur.session_label}` : "") }),
+             ? ` \\u00b7 your last recording on its own: ${cur.session_label}` : "") }),
     ]),
     el("div", { style: "flex:1 1 300px" }, [
       el("div", { class: "lvl-note", style: "margin-top:0", text: cur.blockers.length
-        ? "Held here by " + L.dimensions.filter((d) => d.blocking)
+        ? "Held back by " + L.dimensions.filter((d) => d.blocking)
             .map((d) => d.label.toLowerCase()).join(" and ")
-          + `. The rung moves when all but one dimension reach it, none is more than one `
-          + `rung below, and that holds for ${L.promotion_sessions} sessions running.`
-        : `The rung moves when all but one dimension reach it and that holds for `
-          + `${L.promotion_sessions} sessions running.` }),
+          + `. You move up when all but one of the areas reach the next level, none is `
+          + `more than one step behind, and that holds for ${L.promotion_sessions} `
+          + `recordings in a row.`
+        : `You move up when all but one of the areas reach the next level and that holds `
+          + `for ${L.promotion_sessions} recordings in a row.` }),
       L.floor ? el("div", { class: "lvl-note", text:
-        `The line has not moved, but the floor under it has: the worst single session was `
-        + `${L.floor.worst_label}, last seen on ${L.floor.last_at_worst}, and none of the `
-        + `${L.floor.sessions_since} sessions since has read below `
-        + `${L.floor.floor_since_label}.` }) : null,
+        `Your level hasn't changed, but your worst recordings have got better: the last `
+        + `time one read ${L.floor.worst_label} was ${L.floor.last_at_worst}, and none of `
+        + `the ${L.floor.sessions_since} since has been below ${L.floor.floor_since_label}.` })
+        : null,
     ]),
   ]));
 
@@ -2826,12 +2846,12 @@ function levelChart(width, L) {
   host.append(el("div", { class: "legend", style: "margin-top:20px" }, [
     el("div", { class: "legend-item" }, [
       el("span", { class: "key-line", style: "background: var(--series-1)" }),
-      el("span", { text: "level \\u2014 what the evidence sustains" }),
+      el("span", { text: "your level" }),
     ]),
     el("div", { class: "legend-item" }, [
       el("span", { class: "key-box",
                    style: "background: var(--series-2); border-radius: 50%" }),
-      el("span", { text: "one session on its own" }),
+      el("span", { text: "a single recording on its own" }),
     ]),
   ]));
   host.append(plot);
@@ -2854,7 +2874,7 @@ function levelChart(width, L) {
     for (const m of dim.measures) {
       const row = el("div", { class: "mrow" });
       row.append(el("div", { class: "mlab" }, [
-        el("span", { text: m.label }),
+        el("span", { text: (PLAIN_MEASURES[m.key] || m).label }),
         el("span", { class: "mval",
                      text: m.value === null ? "not measured" : trim(m.value) }),
       ]));
@@ -2864,29 +2884,30 @@ function levelChart(width, L) {
             + `background: var(${m.met ? "--good" : "--series-1"})` }),
         ]));
         row.append(el("div", { class: "mneed", text: m.met
-          ? `clears ${L.target.label} (${m.lower_is_better ? "\\u2264" : "\\u2265"} `
-            + `${trim(m.threshold)} ${m.unit})`
-          : `${L.target.label} needs ${m.lower_is_better ? "\\u2264" : "\\u2265"} `
-            + `${trim(m.threshold)} ${m.unit}` }));
+          ? `reached ${L.target.label} (${m.lower_is_better ? "at most" : "at least"} `
+            + `${trim(m.threshold)} ${(PLAIN_MEASURES[m.key] || m).unit})`
+          : `${L.target.label} needs ${m.lower_is_better ? "at most" : "at least"} `
+            + `${trim(m.threshold)} ${(PLAIN_MEASURES[m.key] || m).unit}` }));
       } else {
         row.append(el("div", { class: "mneed", text: L.target
-          ? `ungated at ${L.target.label}` : "no next rung" }));
+          ? `no target at ${L.target.label}` : "top of the scale" }));
       }
-      row.append(el("div", { class: "mnote-s", text: m.note }));
+      row.append(el("div", { class: "mnote-s", text: (PLAIN_MEASURES[m.key] || m).note }));
       block.append(row);
     }
     grid.append(block);
   }
   host.append(grid);
 
-  host.append(el("div", { class: "note", text:
+  host.append(how(
     `${cur.measured} of ${cur.dimensions_total} dimensions were measured this session `
     + `(${L.min_dimensions} needed, or the reading is marked provisional). Coherence is `
     + "absent on purpose \\u2014 nothing here measures it, and a dimension scored on "
     + "impression would put back the drift this scale exists to remove. Interaction comes "
     + `from question practice and only counts while under ${L.interaction_max_age_days} days `
     + `old. Calibration ${L.calibration}: move a threshold and this whole line moves with `
-    + "it, which is why the rows in level_history.csv carry the calibration that made them." }));
+    + "it, which is why the rows in level_history.csv carry the calibration that made them.",
+    "More about how the level works"));
 })();
 
 /* ---------- session timeline ---------- */
@@ -2898,19 +2919,16 @@ function levelChart(width, L) {
 
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "Session timeline" }),
-      el("div", { class: "sub", text:
-        "Everything dated, newest first \\u2014 the union of recordings and practice, because "
-        + "practice happens on days with no recording and a chronology that dropped those "
-        + "would suggest nothing was done on them." }),
+      el("h2", { text: "Timeline" }),
+      el("div", { class: "sub", text: "Every recording and practice session, newest first." }),
     ]),
   ]));
 
   const t = el("table");
   t.append(el("thead", {}, [el("tr", {}, [
     el("th", { text: "Date" }), el("th", { class: "rung", text: "What happened" }),
-    el("th", { class: "rung", text: "Mode" }), el("th", { text: "Reliable words" }),
-    el("th", { text: "Mistakes / 1,000" }), el("th", { text: "Words lost" }),
+    el("th", { class: "rung", text: "Mode" }), el("th", { text: "Clear words" }),
+    el("th", { text: "Mistakes / 1,000" }), el("th", { text: "Unclear words" }),
     el("th", { text: "Practice" }), el("th", { text: "Scenarios" }),
   ])]));
   const body = el("tbody");
@@ -2932,7 +2950,7 @@ function levelChart(width, L) {
     body.append(el("tr", {}, [
       el("th", { scope: "row" }, [date]),
       el("td", { class: "rung" }, [tags]),
-      el("td", { class: "rung", text: e.mode || "\\u2014" }),
+      el("td", { class: "rung", text: modeText(e.mode) }),
       el("td", { text: e.reliable_words === null ? "\\u2014" : int(e.reliable_words) }),
       el("td", { text: e.rate === null ? "\\u2014" : num(e.rate) }),
       el("td", { text: e.word_share === null || e.word_share === undefined
@@ -2945,8 +2963,8 @@ function levelChart(width, L) {
   host.append(el("div", { class: "table-wrap" }, [t]));
   moreRows(host, T.length, TABLE_ROWS, "dated entries");
   host.append(el("div", { class: "note", text: linked
-    ? `${linked} of ${T.length} dates link to their archived session report under `
-      + "analysis/sessions/. The rest are practice-only days, which write no report."
+    ? `${linked} of ${T.length} dates link to that day's full report. The rest are `
+      + "practice-only days, which have no report."
     : "No archived reports were found to link to \\u2014 the page was built without knowing "
       + "where it would be written, so the dates here are plain text." }));
 })();
@@ -2960,47 +2978,49 @@ function levelChart(width, L) {
   const adopted = C.adopted || [];
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
-      el("h2", { text: "Chances" }),
-      el("div", { class: "sub", text:
-        "Everything else on this page is a numerator. “Six article mistakes per "
+      el("h2", { text: "Mistakes vs. chances" }),
+      el("div", { class: "sub", text: "How often you got a structure right when it came up, not only how often it went wrong. Higher accuracy is better." }),
+      how("Everything else on this page is a numerator. “Six article mistakes per "
         + "thousand words” cannot say out of how many chances, because nothing counted "
         + "how many singular countable nouns were said — words spoken stood in for "
         + "chances, and on this history that substitution does not hold. A frame counts the "
         + "lines where the structure came up at all. It is a lexical match, not a parsed "
         + "one, so this is a proxy: it buys a series comparable with itself, not an exam "
-        + "grade." }),
+        + "grade."),
     ]),
   ]));
 
   host.append(el("div", { class: "notice", text:
-    `${adopted.length} of ${C.rows.length} frames predict their category's errors better `
-    + "than the word count does, and only those are used as a denominator. The rest keep "
-    + "the per-1,000-words rate and say so — a frame that has not earned its place "
-    + "cannot quietly make anything worse." }));
+    `For ${adopted.length} of ${C.rows.length} mistakes, counting chances works better than `
+    + "counting words, so their accuracy is used on this page. For the rest it isn't "
+    + "reliable yet, and mistakes per 1,000 words is used instead." }));
 
   const table = el("table");
   table.append(el("thead", {}, [el("tr", {}, [
-    el("th", { text: "Pattern" }), el("th", { text: "Chances" }),
-    el("th", { text: "Errors" }), el("th", { text: "Accuracy" }),
-    el("th", { text: "Sessions" }), el("th", { class: "where", text: "Denominator" }),
+    el("th", { text: "Mistake" }), el("th", { text: "Chances" }),
+    el("th", { text: "Mistakes" }), el("th", { text: "Right" }),
+    el("th", { text: "Recordings" }), el("th", { class: "where", text: "Accuracy used?" }),
   ])]));
   const body = el("tbody");
   for (const row of C.rows) {
     body.append(el("tr", {}, [
       el("th", { scope: "row" }, [
         el("div", { text: row.category }),
-        row.note ? el("div", { class: "detail", style: "white-space:normal;max-width:52ch",
-                               text: row.note }) : null,
+        // What counts as a chance is written for whoever maintains the frame;
+        // it is there for anyone who asks, not in the way of the numbers.
+        row.note ? el("details", { class: "how" }, [
+          el("summary", { text: "what counts as a chance" }),
+          el("div", { class: "detail", style: "white-space:normal;max-width:52ch",
+                      text: row.note }),
+        ]) : null,
       ]),
       el("td", { text: int(row.opportunities) }),
       el("td", { text: int(row.errors) }),
       el("td", { text: row.accuracy === null ? "—"
         : `${(row.accuracy * 100).toFixed(1)}%` }),
-      el("td", { text: `${row.sessions}${row.enough ? "" : " · thin"}` }),
-      el("td", { class: "where" }, [
-        el("div", { text: row.adopted ? "chances" : "words" }),
-        el("div", { class: "detail", style: "white-space:normal;max-width:44ch",
-                    text: row.verdict }),
+      el("td", { text: `${row.sessions}${row.enough ? "" : " · few"}` }),
+      el("td", { class: "where", title: row.verdict }, [
+        el("div", { text: row.adopted ? "yes" : "not yet" }),
       ]),
     ]));
   }
@@ -3008,17 +3028,15 @@ function levelChart(width, L) {
   host.append(el("div", { class: "table-wrap" }, [table]));
 
   if ((C.frozen || []).length) host.append(el("div", { class: "note", text:
-    "No chance to make these at all in the last three sessions, so their absence streaks are "
-    + "frozen rather than earned: " + C.frozen.join(", ") + ". An absence streak built on "
-    + "sessions where the structure never came up is not evidence of anything — which is "
-    + "a thing this project previously worked out by hand, five sessions late." }));
+    "These haven't come up at all in your last three recordings, so going without them "
+    + "doesn't count as fixed: " + C.frozen.join(", ") + "." }));
 
-  host.append(el("div", { class: "note", text:
+  host.append(how(
     `A session needs ${C.min_opportunities} chances before its own accuracy is shown, and a `
     + `pattern needs ${C.min_sessions} sessions before the pooled figure reads as a trend. `
     + "Patterns with no frame are absent from this table entirely: some opportunities "
     + "— a bare singular noun, a noun used as a modifier — need a parser to spot, "
-    + "and nothing here has one." }));
+    + "and nothing here has one.", "More about chances"));
 })();
 
 /* about this page — what it can and cannot tell you, in one place */
@@ -3033,28 +3051,25 @@ function levelChart(width, L) {
   host.append(el("div", { class: "card-head" }, [
     el("div", {}, [
       el("h2", { text: "About this page" }),
-      el("div", { class: "sub", text:
-        "Every panel states its own caveat where it appears, which makes each one honest and "
-        + "none of them a summary. This is the summary: how much the page as a whole "
-        + "actually knows." }),
+      el("div", { class: "sub", text: "How much this page actually knows, and its limits." }),
     ]),
   ]));
 
   const facts = [
-    [`${MODEL.sessions.length} sessions`, `${MODEL.headline.first_date} to `
-      + `${MODEL.headline.last_date}, ${int(MODEL.headline.reliable_words)} reliable words`],
-    [`${unsure} of ${cats.length} trends cannot be told from chance`,
-     "most of what is recorded here is a handful of events in a couple of thousand words, "
-     + "and a difference of one or two instances is what a random process produces on its "
-     + "own. A direction is only called when a two-sample Poisson test can separate it"],
-    [`${thin} of ${cats.length} rankings rest on fewer than five instances`,
-     "impact is severity against the square root of the rate, and severity is a judgment — "
-     + "so a serious category seen three times can outrank one observed for months. That is "
-     + "not wrong, but it is worth saying out loud"],
-    [`${nodrill} of ${cats.length} patterns have no drill`,
-     "so nothing above rung 3 can be measured for them: the only evidence on record is what "
-     + "the recording caught"],
-    ["The denominator is under test",
+    [`${MODEL.sessions.length} recordings`, `${MODEL.headline.first_date} to `
+      + `${MODEL.headline.last_date}, ${int(MODEL.headline.reliable_words)} clearly `
+      + "transcribed words"],
+    [`${unsure} of ${cats.length} trends are too early to call`,
+     "Each recording has only a few examples of each mistake, and a difference of one or "
+     + "two can just be chance. A trend is only called getting better or worse when a "
+     + "statistical test says it's real"],
+    [`${thin} of ${cats.length} rankings rest on fewer than five examples`,
+     "Importance weighs how serious a mistake is as well as how often it happens, so a "
+     + "serious one seen three times can rank above a minor one seen for months. That's "
+     + "intended, but worth knowing"],
+    [`${nodrill} of ${cats.length} mistakes have no drill`,
+     "so only your recordings say anything about them"],
+    ["Is dividing by words spoken fair?",
      (E.verdict || "not enough sessions to tell yet")
      + (E.narrow ? `. Session lengths span only ${E.spread}× so far, which is narrow `
                    + "enough to hide a real relationship" : "")],
@@ -3069,11 +3084,11 @@ function levelChart(width, L) {
   host.append(list);
 
   host.append(el("div", { class: "note", text:
-    "Nothing here is an exam result. The level is a rung on a scale calibrated against this "
-    + "speaker's own record; the chance-based accuracy is a lexical proxy; the mistake counts "
-    + "are one coach's judgment, applied consistently. What the page is good at is noticing "
-    + "that something has not moved in three sessions, which is the thing a person reading "
-    + "their own notes reliably fails to notice." }));
+    "Nothing here is an exam result. The level is measured against your own recordings, "
+    + "the chances figure is an approximation, and the mistake counts are one coach's "
+    + "judgment, applied the same way every time. What this page is good at is noticing "
+    + "when something hasn't moved in three recordings, which is easy to miss in your own "
+    + "notes." }));
 })();
 
 /* ---------- views and section nav ---------- */

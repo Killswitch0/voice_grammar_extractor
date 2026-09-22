@@ -144,8 +144,8 @@ DIMENSIONS = [
                     "um / uh / erm — a lower bound, since whisper drops many"),
             Measure("markers", "Discourse markers", "per 100 words", True,
                     [5.0, 4.0, 3.2, 2.8, 2.4, 2.0, 1.6, 1.2],
-                    "“you know”, “I mean” and friends: for this speaker "
-                    "the larger of the two by two orders of magnitude"),
+                    "“you know”, “I mean” and friends: often a far larger "
+                    "habit than the filler sounds"),
         ],
     ),
     Dimension(
@@ -155,8 +155,7 @@ DIMENSIONS = [
         measures=[
             Measure("mattr", "Lexical variety (MATTR)", "ratio", False,
                     [0.290, 0.330, 0.365, 0.380, 0.395, 0.410, 0.425, 0.440],
-                    "the lower rungs sit around the band this speaker has actually "
-                    "shown, so B1+ is below all of it and B2.1 above its middle; the "
+                    "the lower rungs are calibrated against observed speech, so the "
                     "rungs past B2.2 are extrapolations beyond anything yet measured"),
             Measure("novelty", "Words new in 3 sessions", "per 1,000 words", False,
                     [45.0, 60.0, 72.0, 82.0, 92.0, 102.0, 112.0, 125.0],

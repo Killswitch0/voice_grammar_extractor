@@ -951,8 +951,8 @@ def test_the_first_action_is_the_one_where_drilling_is_the_wrong_answer(tmp_path
     patterns = [a for a in actions if not a["blocking"]]
 
     assert patterns[0]["kind"] == "automaticity-gap"
-    assert patterns[0]["title"] == "Produce it in dialogue: Article Errors"
-    assert "100% correct over 10 drill items" in patterns[0]["detail"]
+    assert patterns[0]["title"] == "Practise it in conversation: Article Errors"
+    assert "100% right in drills (10/10)" in patterns[0]["detail"]
     # The ladder and the card grid are one section now, so that is where it points.
     assert patterns[0]["anchor"] == "patterns"
 
@@ -981,7 +981,7 @@ def test_an_overdue_question_pattern_counts_even_with_no_rung_three(tmp_path: Pa
     overdue = next(a for a in model["actions"] if a["kind"] == "overdue-dialogue")
 
     assert "Question Register And Softening Frames" in overdue["detail"]
-    assert "the oldest since 2026-08-03" in overdue["detail"]
+    assert "Overdue since 2026-08-03" in overdue["detail"]
     assert overdue["anchor"] == "askpatterns"
 
     # The tracked one is not repeated as its own line; it is a flag where it lives.
@@ -1344,7 +1344,7 @@ def test_the_drill_suggestion_skips_a_category_nobody_has_seen(tmp_path: Path):
     drill_action = next(a for a in actions if a["kind"] == "no-drill")
 
     assert "Common enough" in drill_action["title"]
-    assert "enough instances on record" in drill_action["detail"]
+    assert "enough examples on record" in drill_action["detail"]
 
 
 def test_the_page_reports_whether_its_own_denominator_holds(tmp_path: Path):
@@ -1529,3 +1529,53 @@ def test_chances_are_absent_rather_than_guessed_when_no_frame_exists(tmp_path: P
 
     assert model["opportunity"] == {"frames": 0, "rows": [], "adopted": []}
     assert model["categories"][0]["latest_rate"] is not None      # the word rate still works
+
+
+# --- plain words --------------------------------------------------------------
+# The page is read by the owner, not the coach: every line has to say which way
+# is good and what to do, without the project's own terms.
+
+
+def test_the_summary_says_which_way_each_number_went(tmp_path: Path):
+    """A fall in serious mistakes is good news and has to read as good news; a
+    series that barely moved is said to be the same rather than given a sign."""
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        (f"2026-08-{d:02d}", 1000, [("Serious one", 4, 8 if d <= 3 else 2),
+                                    ("Minor one", 2, 2 if d <= 3 else 8)])
+        for d in range(1, 7)
+    ])
+
+    verdict = dashboard.build_model(analysis_dir=directory, today="2026-08-20")["verdict"]
+
+    serious = verdict[0]
+    assert serious["tone"] == "good"
+    assert serious["text"].startswith("Serious mistakes are down 75%")
+    # Both categories are day-one ones and their sum did not move.
+    cohort = verdict[1]
+    assert cohort["tone"] == "neutral" and "about the same" in cohort["text"]
+    assert verdict[-1]["tone"] == "next" and verdict[-1]["text"].startswith("Next: ")
+
+
+def test_the_practice_reminder_names_the_mode_without_the_rules(tmp_path: Path):
+    """The coach's version of this line cites rule 19 and rung 2; the page's says
+    how long it has been and which practice to pick."""
+    from voxlib import practice
+
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-09-10", 1000, [("Article Errors", 2, 4)]),
+        ("2026-09-17", 1000, [("Article Errors", 2, 4)]),
+    ])
+    _practice(directory / "practice_history.csv", [
+        {"date": "2026-08-18", "words": 200, "reproductions": 2, "mode": practice.ASK_MODE},
+    ])
+
+    first = dashboard.build_model(analysis_dir=directory, today="2026-09-18")["actions"][0]
+
+    assert first["title"] == "Do a conversation practice session"
+    assert "31 days ago" in first["detail"]
+    assert "let's practice" in first["detail"]
+    assert "rule" not in first["detail"] and "rung" not in first["detail"]

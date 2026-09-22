@@ -95,14 +95,26 @@ output/                 all overwritten on every run:
   dashboard.html            every history in analysis/ as one page, in two views.
                               **Now** answers the questions asked on every open and is
                               bounded — the same three or four screens at session 12 and at
-                              session 300: the loop strip (is the measuring side running,
-                              is the training side, is anything overdue — rule 19's two
-                              counts as elapsed time rather than as a fortnight's total),
-                              the level with the single nearest unmet threshold beside it,
-                              the clarity-tier rate, ONE thing to do next with the rest
-                              behind a disclosure (rule 20), the rate over time with drills
-                              and practice sessions marked on the same axis, a start-to-now
-                              comparison, and the focus slate as a rule-17 portfolio.
+                              session 300: a summary of three or four sentences (what got
+                              better, what got worse, what to do next), the level with
+                              every measure still short of the next rung as a progress bar,
+                              the serious-mistake (clarity-tier) rate, ONE thing to do next
+                              with the rest behind a disclosure (rule 20), "Your routine" —
+                              recording, practice and reviews as elapsed time (rule 19),
+                              the rate over time with drills and practice sessions marked
+                              on the same axis, a then-vs-now comparison, and the mistakes
+                              to work on as a rule-17 portfolio.
+                              **The page is written for the owner, not for the coach.**
+                              It says "serious / minor mistakes", "same checklist as day
+                              one", "in drills / in practice chat / in real speech" —
+                              never tiers, rungs, cohorts, rule numbers, file names or CLI
+                              commands in the main text, and it says which direction is
+                              good beside every number. The project's own terms stay in the
+                              code (priority.py keeps them because the coach reads them),
+                              and a section's reasoning goes in its folded "How is this
+                              measured?" block. dashboard.py holds the plain wording
+                              (PLAIN_STATES, PLAIN_ACTIONS, _plain_why, _plain_blocker,
+                              _verdict); keep new text to that standard.
                               **Evidence** holds everything that grows one row or one column
                               per session and is navigated rather than scrolled past: the
                               level detail, every tracked pattern, the chances table, the

@@ -76,6 +76,28 @@ MIN_DRILL_ITEMS = priority.MIN_DRILL_ITEMS
 FORM_KNOWN_ACCURACY = priority.FORM_KNOWN_ACCURACY
 LADDER_STATES = priority.LADDER_STATES
 
+# The page's own words for the rungs and what to do about each. `priority.py`
+# keeps the project's terms because the coach reads them with the rules at hand;
+# the page is read by a person who has not, and "automaticity gap" or "rung 2"
+# tells them nothing.
+PLAIN_STATES = {
+    "no-drill": "No drill for it yet",
+    "thin-evidence": "Too few drill answers yet",
+    "form-unreliable": "The rule isn't solid yet",
+    "automaticity-gap": "Know the rule, still slip when speaking",
+    "clean": "Not heard in your last recording",
+    "retiring": "Fixed",
+}
+PLAIN_ACTIONS = {
+    "automaticity-gap": "Practise it in conversation",
+    "form-unreliable": "Keep drilling it",
+    "no-drill": "Write a drill for it",
+    "thin-evidence": "Drill it again",
+    "clean": "Keep an eye on it",
+    "retiring": "Take it off the list",
+}
+PLAIN_TIERS = {"clarity": "serious", "polish": "minor"}
+
 
 def _load_scores(path: Path) -> list[dict]:
     """`scores_history.csv` — the only history no module owns.
@@ -559,35 +581,32 @@ def _categories(rows: list[mistakes.SessionRow], dates: list[str],
 # What each speech metric means and which way is better. Taken from
 # `fluency.py`'s module docstring rather than guessed: the filler rate is a lower
 # bound because whisper drops hesitations before we see the text, and the
-# discourse-marker rate is "for this speaker the larger problem by two orders of
-# magnitude" — which is the only reason a falling marker rate is worth a chart of
-# its own rather than a column in a table.
+# discourse-marker rate can be a far larger habit than the fillers — which is the
+# only reason a falling marker rate is worth a chart of its own rather than a
+# column in a table.
 SPEECH_METRICS = [
     {
-        "key": "filler_rate", "label": "Filler sounds", "unit": "per 100 words",
+        "key": "filler_rate", "label": "Um / uh sounds", "unit": "per 100 words",
         "decimals": 2,
-        "note": "um / uh / erm over reliable words. A lower bound on real "
-                "disfluency \u2014 whisper drops many hesitations before this can count them.",
+        "note": "um / uh / erm. The transcriber drops some of them, so the real number is "
+                "a bit higher. Lower is better.",
     },
     {
-        "key": "marker_rate", "label": "Discourse markers", "unit": "per 100 words",
-        "decimals": 2,
+        "key": "marker_rate", "label": "\u201cYou know\u201d / \u201cI mean\u201d",
+        "unit": "per 100 words", "decimals": 2,
         "note": "\u201cyou know\u201d, \u201cI mean\u201d, \u201ckind of\u201d and "
-                "friends. Counted, never stripped \u2014 and for this speaker the larger "
-                "of the two by two orders of magnitude.",
+                "similar filler phrases \u2014 often a far larger habit than the filler "
+                "sounds. Lower is better.",
     },
     {
         "key": "median_pause", "label": "Median pause", "unit": "seconds",
         "decimals": 2,
-        "note": "The gap between consecutive lines, over all of them \u2014 a timestamp is "
-                "valid whether or not the words on it were recognised.",
+        "note": "The typical gap between your sentences.",
     },
     {
         "key": "long_pause_rate", "label": "Pauses over 2s", "unit": "per minute of speech",
         "decimals": 2,
-        "note": "The recorded count divided by the recorded speech minutes, because a count "
-                "on its own rises with the length of the session. Both numbers are in the "
-                "table.",
+        "note": "Long pauses per minute of speaking. Lower is better.",
     },
 ]
 
@@ -651,8 +670,8 @@ def _speech(rows: list[fluency.HistoryRow]) -> dict:
     bases = [b for b in (fluency.VAD_BASIS, fluency.SEGMENT_BASIS)
              if any(s["basis"] == b for s in sessions)]
     labels = {
-        fluency.VAD_BASIS: "VAD-tight turns (diarization)",
-        fluency.SEGMENT_BASIS: "whisper segments (solo)",
+        fluency.VAD_BASIS: "Recordings with other people",
+        fluency.SEGMENT_BASIS: "Solo recordings",
     }
     # One key per basis, blank everywhere else, so the line simply stops at the
     # change of instrument instead of stepping across it.
@@ -1114,7 +1133,7 @@ def _ladder(cards: list[dict], drill_stats: dict[str, dict],
     return {
         "rows": rows,
         "states": counts,
-        "state_labels": LADDER_STATES,
+        "state_labels": PLAIN_STATES,
         "dialogue_only": dialogue_only,
         "today": today,
         # Whether rung 2 has any measurement at all. Every practice session on
@@ -1246,11 +1265,13 @@ def _progress(sessions: list[dict], level_model: dict) -> dict:
 
     series = []
     for key, label, note in (
-        ("cohort_rate", "Day-one categories",
-         "the only set counted the same way at both ends — the answer to the question"),
-        ("clarity_rate", "Clarity tier", "errors that cost the listener the meaning"),
-        ("rate", "All categories",
-         "rises as coaching finds new patterns, whatever the speaker does"),
+        ("clarity_rate", "Serious mistakes",
+         "the ones where a listener can lose your meaning"),
+        ("cohort_rate", "Same checklist as day one",
+         "only the mistakes tracked since your first recording, counted the same way at "
+         "both ends, so it's the fair before-and-after comparison"),
+        ("rate", "Everything tracked",
+         "not a fair comparison: it goes up whenever a new mistake type is added to the list"),
     ):
         before, after = mean(early, key), mean(late, key)
         series.append({
@@ -1360,10 +1381,9 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
     if retiring:
         wins.append({
             "kind": "retiring",
-            "title": f"{len(retiring)} pattern{'' if len(retiring) == 1 else 's'} "
-                     "ready to retire",
-            "detail": ", ".join(f"{r['category']} (clean {r['absence_streak']} sessions "
-                                "running)" for r in retiring[:2]),
+            "title": f"{len(retiring)} mistake{'' if len(retiring) == 1 else 's'} fixed",
+            "detail": ", ".join(f"{r['category']} (none in your last {r['absence_streak']} "
+                                "recordings)" for r in retiring[:2]),
             "anchor": "patterns",
         })
 
@@ -1374,9 +1394,9 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
     if improving:
         wins.append({
             "kind": "improving",
-            "title": f"{len(improving)} of {len(categories)} patterns are measurably "
+            "title": f"{len(improving)} of {len(categories)} mistakes are clearly "
                      "improving",
-            "detail": "the biggest by impact: "
+            "detail": "The biggest: "
                       + ", ".join(c["category"] for c in improving[:3]),
             "anchor": "patterns",
         })
@@ -1385,8 +1405,8 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
     if leaning and not improving:
         wins.append({
             "kind": "leaning",
-            "title": f"{len(leaning)} more are pointing the right way",
-            "detail": "not yet far enough from chance to call it, on counts this small: "
+            "title": f"{len(leaning)} more are heading the right way",
+            "detail": "Too early to be sure, but going down: "
                       + ", ".join(c["category"] for c in leaning[:3]),
             "anchor": "patterns",
         })
@@ -1399,7 +1419,8 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
     if known:
         wins.append({
             "kind": "form-known",
-            "title": f"{len(known)} form{'' if len(known) == 1 else 's'} reliable under test",
+            "title": f"{len(known)} rule{'' if len(known) == 1 else 's'} you get right in "
+                     "drills",
             "detail": ", ".join(f"{r['category']} "
                                 f"({r['drill']['correct']}/{r['drill']['attempted']})"
                                 for r in known[:3]),
@@ -1414,9 +1435,9 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
         if after > before:
             wins.append({
                 "kind": "asking",
-                "title": "Question scenarios are going better",
-                "detail": f"{first['met']}/{first['total']} on {first['date']} to "
-                          f"{last['met']}/{last['total']} on {last['date']}",
+                "title": "Question practice is going better",
+                "detail": f"{last['met']} of {last['total']} goals met on {last['date']}, "
+                          f"up from {first['met']} of {first['total']} on {first['date']}",
                 "anchor": "asking",
             })
 
@@ -1436,9 +1457,9 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
             wins.append({
                 "kind": "speech",
                 "title": f"{metric['label']} are down",
-                "detail": f"{round(before, 2)} to {round(after, 2)} {metric['unit']}, "
-                          f"comparing the first {window} measured session"
-                          f"{'' if window == 1 else 's'} with the last {window}",
+                "detail": f"{round(before, 2)} \u2192 {round(after, 2)} {metric['unit']}, "
+                          f"your first {window} recording{'' if window == 1 else 's'} "
+                          f"against your last {window}",
                 "anchor": "speech",
             })
 
@@ -1447,7 +1468,7 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
             wins.append({
                 "kind": "asking-pattern",
                 "title": f"{pattern['name']} is improving",
-                "detail": f"{pattern['sessions_with_error']} sessions with an error"
+                "detail": f"{pattern['sessions_with_error']} practice sessions with a mistake"
                           + (f", last on {pattern['last_error']}"
                              if pattern["last_error"] and pattern["last_error"] != "\u2014"
                              else " on record"),
@@ -1479,38 +1500,105 @@ def _fluency_slot(speech: dict, vocabulary: dict) -> Optional[dict]:
         return {
             "kind": "vocabulary",
             "category": f"\u201c{worst['phrase']}\u201d",
-            "detail": f"still rising across the archive \u2014 {worst['total']} uses in all, "
-                      f"and no replacement from the table has taken hold",
+            "detail": f"You've said it {worst['total']} times across your recordings and it's "
+                      "still going up. Words to retire has replacements to try.",
             "anchor": "vocabulary",
         }
     if len(points) >= 2 and points[-1]["value"] >= points[-2]["value"]:
         return {
             "kind": "markers",
-            "category": "Discourse markers",
+            "category": markers["label"],
             "detail": f"{points[-1]['value']} per 100 words on {points[-1]['date']}, "
-                      f"up from {points[-2]['value']} \u2014 the fluency slot rule 17 reserves, "
-                      f"and for this speaker the larger problem of the two",
+                      f"up from {points[-2]['value']} the time before.",
             "anchor": "speech",
         }
     return None
 
 
-def _actions(targets: list, blocking: list, fluency_slot: Optional[dict]) -> list[dict]:
+def _times(count: Optional[int]) -> str:
+    return f"{count or 0} time{'' if count == 1 else 's'}"
+
+
+def _plain_why(target: priority.Target, *, overdue_days: Optional[int],
+               evidence: Optional[int], drillable_first: bool) -> str:
+    """Why a pattern is on the list, from the same facts `priority._reasons`
+    reads, in words for the person rather than for the coach."""
+    parts = []
+    stat = target.drill
+    if target.state == "automaticity-gap" and stat:
+        parts.append(f"{round((stat['accuracy'] or 0) * 100)}% right in drills "
+                     f"({stat['correct']}/{stat['attempted']}), but still "
+                     f"{_times(target.latest_count)} in your last recording")
+    if drillable_first:
+        parts.append("the most important mistake without a drill, with enough examples "
+                     "on record to write one" + (f" ({evidence} so far)" if evidence else ""))
+    if "stalled" in target.flags:
+        parts.append(f"no better than {mistakes.STALL_WINDOW} recordings ago, so try a "
+                     "different approach")
+    if "thin" in target.flags:
+        parts.append(f"heard only {_times(evidence)} so far, so it could be a fluke")
+    if overdue_days is not None:
+        parts.append(f"review is {overdue_days} days overdue")
+    if "frozen" in target.flags:
+        parts.append(f"hasn't come up in your last {mistakes.STALL_WINDOW} recordings, so it's "
+                     "too early to call it fixed")
+    text = "; ".join(parts)
+    return text[:1].upper() + text[1:] + "." if text else ""
+
+
+def _plain_blocker(block: priority.Blocker, loop: practice.LoopState,
+                   ladder: dict) -> tuple[str, str]:
+    """A blocker's title and detail in plain words, rebuilt from the same
+    readings `priority.blockers` decided on — its own wording cites rules and
+    rungs, which is right for the coach and opaque on the page."""
+    if block.kind == "unanalysed":
+        return block.title, ("It has been transcribed but not analysed yet, so nothing on "
+                             "this page includes it.")
+    if block.kind == "treatment-stopped":
+        unbridged = not ladder["attended_sessions"] and ladder["asking_sessions"]
+        if loop.train.state == "never":
+            since = "You haven't done a practice session with corrections yet"
+        else:
+            since = f"Your last practice with corrections was {loop.train.days} days ago"
+        detail = (f"{since}, and you've recorded {loop.recordings_in_window} time"
+                  f"{'' if loop.recordings_in_window == 1 else 's'} in the last "
+                  f"{loop.window_days} days. Recordings only measure your English; "
+                  "practice is what improves it.")
+        if unbridged:
+            detail += (" Choose conversation practice (\u201clet's practice\u201d): every "
+                       "session so far was question practice, which doesn't work on the "
+                       "grammar mistakes below.")
+        return ("Do a conversation practice session" if unbridged
+                else "Do a practice session"), detail
+    if block.kind == "overdue-dialogue":
+        late = sorted((row for row in ladder["dialogue_only"] if row["overdue"]),
+                      key=lambda row: row["next_due"])
+        names = ", ".join(row["category"] for row in late[:3]) + (", \u2026" if len(late) > 3 else "")
+        return (f"{len(late)} question skill{'' if len(late) == 1 else 's'} due for review",
+                f"Overdue since {late[0]['next_due']}: {names}. Say \u201clet's practice "
+                "asking\u201d to review them. Recordings can't measure these, so this "
+                "reminder is the only thing that keeps track of them.")
+    return block.title, block.detail
+
+
+def _actions(targets: list, blocking: list[tuple[priority.Blocker, str, str]],
+             fluency_slot: Optional[dict], plain: dict[str, dict]) -> list[dict]:
     """
     The one thing to do next, and the four behind it.
 
     Rule 20 is the reason the first one is drawn differently from the rest: five
     things to carry into a session is a list of zero, and the page used to print
     five of equal weight. The ranking is `priority.py`'s and nothing is decided
-    here — this only turns it into rows.
+    here — this only turns it into rows, in the page's words (`plain`, per
+    category, and each blocker's rewording alongside it).
     """
     actions = [{
         "kind": block.kind,
-        "title": block.title,
-        "detail": block.detail,
+        "title": title,
+        "detail": detail,
         "anchor": block.anchor,
         "blocking": True,
-    } for block in blocking]
+    } for block, title, detail in blocking]
 
     # Rule 17 reserves a slot for fluency or vocabulary, and a reserved slot that
     # gets truncated away is not reserved. So the grammar targets are cut to fit
@@ -1518,13 +1606,11 @@ def _actions(targets: list, blocking: list, fluency_slot: Optional[dict]) -> lis
     # in the code and never once appeared on the page.
     room = MAX_ACTIONS - len(actions) - (1 if fluency_slot else 0)
     for target in targets[:max(room, 0)]:
+        words = plain[target.category]
         actions.append({
             "kind": target.state,
-            "title": f"{target.action}: {target.category}",
-            "detail": target.why or (target.action_why + " \u2014 ") + (
-                f"impact {target.impact}, {target.tier} tier, "
-                f"{target.latest_count if target.latest_count is not None else 0} "
-                f"instance(s) in the last measured session"),
+            "title": f"{words['action']}: {target.category}",
+            "detail": words["why"] or words["state"] + ".",
             "anchor": "patterns",
             "slug": target.slug,
             "blocking": False,
@@ -1533,7 +1619,7 @@ def _actions(targets: list, blocking: list, fluency_slot: Optional[dict]) -> lis
     if fluency_slot:
         actions.append({
             "kind": "fluency-slot",
-            "title": f"{fluency_slot['category']} \u2014 the reserved fluency slot",
+            "title": f"Say {fluency_slot['category']} less",
             "detail": fluency_slot["detail"],
             "anchor": fluency_slot["anchor"],
             "blocking": False,
@@ -1613,6 +1699,20 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
     )
     fluency_slot = _fluency_slot(speech, vocabulary)
 
+    cards_by_name = {card["category"]: card for card in categories}
+    drillable_first = next((t.category for t in targets
+                            if t.state == "no-drill" and "thin" not in t.flags), None)
+    plain = {t.category: {
+        "state": PLAIN_STATES[t.state],
+        "action": PLAIN_ACTIONS[t.state],
+        "why": _plain_why(t, overdue_days=overdue.get(t.category),
+                          evidence=cards_by_name.get(t.category, {}).get("evidence"),
+                          drillable_first=t.category == drillable_first),
+    } for t in targets}
+    actions = _actions(slate, [(b, *_plain_blocker(b, loop_state, ladder)) for b in blocking],
+                       fluency_slot, plain)
+    progress = _progress(sessions, level_model)
+
     return {
         "generated_at": generated,
         "generated_full": datetime.now().isoformat(timespec="minutes").replace("T", " "),
@@ -1628,7 +1728,8 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
         "ladder": ladder,
         "speech": speech,
         "asking": asking_model,
-        "actions": _actions(slate, blocking, fluency_slot),
+        "actions": actions,
+        "verdict": _verdict(progress, categories, actions),
         "slate": [{
             "category": target.category, "slug": target.slug, "state": target.state,
             "state_label": LADDER_STATES[target.state], "action": target.action,
@@ -1636,32 +1737,64 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
             "latest_rate": target.latest_rate, "latest_count": target.latest_count,
             "flags": target.flags, "why": target.why, "slot": target.slot,
             "drill": target.drill,
+            "plain_state": plain[target.category]["state"],
+            "plain_action": plain[target.category]["action"],
+            "plain_why": plain[target.category]["why"],
+            "plain_tier": PLAIN_TIERS.get(target.tier, target.tier),
         } for target in slate],
         "blocking": [{"kind": b.kind, "title": b.title, "detail": b.detail,
                       "anchor": b.anchor} for b in blocking],
-        "progress": _progress(sessions, level_model),
+        "progress": progress,
         "treatment": _treatment(drill_rows, practice_sessions),
         "working": _whats_working(ladder, categories, speech, asking_model),
         "level": level_model,
-        "level_gap": _level_gap(level_readings),
         "vocabulary": vocabulary,
         "timeline": _timeline(sessions, speech["sessions"], practice_sessions,
                               scenario_runs, _reports(analysis_dir, out_dir)),
     }
 
 
-def _level_gap(readings: list) -> dict:
-    """The nearest unmet threshold — see `level.closest_gap`.
+def _verdict(progress: dict, categories: list[dict], actions: list[dict]) -> list[dict]:
+    """The page in three or four sentences: what got better, what got worse, what
+    to do. Nothing here is new — each line restates a reading from Start to now,
+    the pattern directions or the action list — but those are three places to
+    read against each other, and the first question on opening the page is the
+    answer they give together."""
+    lines = []
+    series = {s["key"]: s for s in progress.get("series", [])}
+    for key, what in (("clarity_rate", "Serious mistakes"),
+                      ("cohort_rate", "Mistakes on your day-one checklist")):
+        row = series.get(key)
+        if not row or row["change"] is None or not row["before"]:
+            continue
+        percent = round(abs(row["change"]) / row["before"] * 100)
+        if percent < 5:
+            lines.append({"tone": "neutral", "text": f"{what} are about the same as when you "
+                                                     "started."})
+            continue
+        lines.append({
+            "tone": "good" if row["better"] else "bad",
+            "text": f"{what} are {'down' if row['better'] else 'up'} {percent}% since you "
+                    f"started ({num_text(row['before'])} \u2192 {num_text(row['after'])} per "
+                    "1,000 words).",
+        })
 
-    Separate from `_level` because it answers a different question: that panel
-    says where the line is, this says what would move it. On a scale with
-    three-session hysteresis the first is constant for weeks at a time and the
-    second changes every session, which is the one of the two that works as
-    weekly feedback.
-    """
-    if not readings:
-        return {}
-    return level.closest_gap(readings[-1]) or {}
+    worse = sorted((c for c in categories if c["direction"] == "worsening"),
+                   key=lambda c: -c["impact"])
+    if worse:
+        worst = worse[0]
+        lines.append({"tone": "bad", "text":
+                      f"{worst['category']} {'is' if len(worse) == 1 else 'are the biggest'} "
+                      "getting worse"
+                      + (f": {_times(worst['latest_count'])} in your last recording."
+                         if worst["latest_count"] else ".")})
+    if actions:
+        lines.append({"tone": "next", "text": f"Next: {actions[0]['title']}."})
+    return lines
+
+
+def num_text(value: float) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
 # --- rendering ----------------------------------------------------------------
