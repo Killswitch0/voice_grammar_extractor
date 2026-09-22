@@ -114,7 +114,10 @@ output/                 all overwritten on every run:
                               and a section's reasoning goes in its folded "How is this
                               measured?" block. dashboard.py holds the plain wording
                               (PLAIN_STATES, PLAIN_ACTIONS, _plain_why, _plain_blocker,
-                              _verdict); keep new text to that standard.
+                              _verdict); keep new text to that standard. A mistake's title
+                              on the page is its `Plain name:` line in memory.md (the
+                              `##` heading stays the join key and shows small beneath it),
+                              and every action says what to type to start it.
                               **Evidence** holds everything that grows one row or one column
                               per session and is navigated rather than scrolled past: the
                               level detail, every tracked pattern, the chances table, the

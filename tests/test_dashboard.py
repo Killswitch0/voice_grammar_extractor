@@ -981,7 +981,7 @@ def test_an_overdue_question_pattern_counts_even_with_no_rung_three(tmp_path: Pa
     overdue = next(a for a in model["actions"] if a["kind"] == "overdue-dialogue")
 
     assert "Question Register And Softening Frames" in overdue["detail"]
-    assert "Overdue since 2026-08-03" in overdue["detail"]
+    assert "Overdue since 3 Aug" in overdue["detail"]
     assert overdue["anchor"] == "askpatterns"
 
     # The tracked one is not repeated as its own line; it is a flag where it lives.
@@ -1577,5 +1577,55 @@ def test_the_practice_reminder_names_the_mode_without_the_rules(tmp_path: Path):
 
     assert first["title"] == "Do a conversation practice session"
     assert "31 days ago" in first["detail"]
-    assert "let's practice" in first["detail"]
+    assert first["how"] == "let's practice"
     assert "rule" not in first["detail"] and "rung" not in first["detail"]
+
+
+def test_a_mistake_carries_the_owners_name_and_clean_examples():
+    """memory.md's `Plain name:` is what the page leads with; the heading stays
+    the join key. A line holding two quoted pairs must not keep the inner quotes."""
+    note = dashboard._parse_note(
+        'Plain name: Missing "a" / "the"\n'
+        "Status: Active\n"
+        "Typical examples:\n"
+        '- "it\'s nice idea" / "that\'s great film" -> "a nice idea" / "a great film" (2026-08-01)\n')
+
+    assert note["plain_name"] == 'Missing "a" / "the"'
+    assert note["examples"][0]["wrong"] == "it's nice idea / that's great film"
+    assert note["examples"][0]["right"] == "a nice idea / a great film"
+
+
+def test_a_rate_is_said_in_words_a_person_would_use():
+    assert dashboard._one_in(4.05) == "1 in every 250 words"
+    assert dashboard._one_in(7.97) == "1 in every 130 words"
+    assert dashboard._one_in(0) == ""
+    assert dashboard._nice_date("2026-08-03") == "3 Aug"
+
+
+def test_right_in_drills_but_wrong_in_speech_is_not_good_news(tmp_path: Path):
+    """The same mistake cannot be the top problem and a win at once."""
+    from voxlib import drill
+
+    directory = tmp_path / "analysis"
+    directory.mkdir()
+    _history(directory / "mistakes.csv", [
+        ("2026-08-01", 1000, [("Article Errors", 2, 12)]),
+        ("2026-08-02", 1000, [("Article Errors", 2, 14)]),
+    ])
+    _drill(directory / "drills.csv", "Article Errors", [("2026-08-02", 10, 10, drill.BLOCKED)])
+
+    model = dashboard.build_model(analysis_dir=directory)
+
+    assert not any(w["kind"] == "form-known" for w in model["working"])
+    lead = next(a for a in model["actions"] if a["kind"] == "automaticity-gap")
+    assert lead["how"] == "let's practice"
+
+
+def test_the_table_column_class_is_not_restyled_by_a_layout_rule():
+    """`where` names a text column in four tables. A bare `.where` layout rule once
+    turned every one of those cells into a flex box, so the column stopped lining
+    up with its rows."""
+    import re
+    from voxlib.dashboard_page import TEMPLATE
+
+    assert not re.search(r"^\s*\.where\s*[{\[]", TEMPLATE, flags=re.M)

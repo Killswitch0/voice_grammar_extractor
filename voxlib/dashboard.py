@@ -136,8 +136,8 @@ def _load_scores(path: Path) -> list[dict]:
 # retelling of — an `Occurrences:` line listing every session's count is the
 # sparkline above it, in words. Only Status carries something the data does not:
 # the rule-18 flag and what was decided about it.
-_NOTE_FIELD = re.compile(r"^(Status|Occurrences|First seen|Last seen|Severity|Notes"
-                         r"|Earlier note retained):\s*(.*)$")
+_NOTE_FIELD = re.compile(r"^(Plain name|Status|Occurrences|First seen|Last seen|Severity"
+                         r"|Notes|Earlier note retained):\s*(.*)$")
 _EXAMPLES_MARKER = re.compile(r"^Typical examples:\s*$")
 # `- "wrong" -> "right" (a date)`, optionally with where it came from:
 # `(a date, question practice)`. Every bullet on record fits this shape.
@@ -206,8 +206,10 @@ def _parse_note(body: str) -> Optional[dict]:
             example = _EXAMPLE.match(stripped)
             if example:
                 examples.append({
-                    "wrong": example.group("wrong"),
-                    "right": example.group("right"),
+                    # `- "a" / "b" -> "c" / "d"` is two pairs on one line; the
+                    # regex takes the outer quotes, which leaves the inner ones.
+                    "wrong": example.group("wrong").replace('" / "', " / "),
+                    "right": example.group("right").replace('" / "', " / "),
                     "date": example.group("date") or "",
                     "source": (example.group("source") or "").strip(),
                 })
@@ -237,6 +239,9 @@ def _parse_note(body: str) -> Optional[dict]:
         "status": fields.get("Status", ""),
         "notes": fields.get("Notes", ""),
         "retained": fields.get("Earlier note retained", ""),
+        # The owner's name for the mistake; the heading is the grammar name and
+        # the join key, so it can't be the one the page leads with.
+        "plain_name": fields.get("Plain name", ""),
         "examples": examples,
         # Newest first: the most recent decision is the one in force. Sorted by
         # the date in the title rather than by position, because the convention
@@ -1146,7 +1151,9 @@ def _ladder(cards: list[dict], drill_stats: dict[str, dict],
     }
 
 
-def _loop(state: practice.LoopState, dates: list[str]) -> dict:
+def _loop(state: practice.LoopState, dates: list[str],
+          overdue_rows: Optional[list[tuple[str, str]]] = None,
+          names: Optional[dict[str, str]] = None) -> dict:
     """
     Whether the loop is turning — the question this page could not ask.
 
@@ -1169,11 +1176,18 @@ def _loop(state: practice.LoopState, dates: list[str]) -> dict:
     not, and nothing would have been wrong with either.
     """
     rhythm = mistakes.cadence(dates)
+    details = {side.key: side.detail for side in state.sides}
+    # practice.py names the oldest review by its heading; the page uses the
+    # owner's name for it, like everywhere else.
+    if overdue_rows:
+        oldest = min(overdue_rows, key=lambda row: row[1])[0]
+        details["review"] = (f"{len(overdue_rows)} overdue, oldest: "
+                             f"{(names or {}).get(oldest, oldest)}")
     return {
         "today": state.today,
         "sides": [{
             "key": side.key, "label": side.label, "last": side.last,
-            "days": side.days, "state": side.state, "detail": side.detail,
+            "days": side.days, "state": side.state, "detail": details[side.key],
         } for side in state.sides],
         "worst": state.worst.key,
         "running": all(side.running for side in state.sides),
@@ -1376,14 +1390,15 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
     """
     wins: list[dict] = []
     rows = ladder.get("rows", [])
+    cards = {c["category"]: c for c in categories}
 
     retiring = [r for r in rows if r["state"] == "retiring"]
     if retiring:
         wins.append({
             "kind": "retiring",
             "title": f"{len(retiring)} mistake{'' if len(retiring) == 1 else 's'} fixed",
-            "detail": ", ".join(f"{r['category']} (none in your last {r['absence_streak']} "
-                                "recordings)" for r in retiring[:2]),
+            "detail": ", ".join(f"{_name(r['category'], cards)} (none in your last "
+                                f"{r['absence_streak']} recordings)" for r in retiring[:2]),
             "anchor": "patterns",
         })
 
@@ -1397,7 +1412,7 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
             "title": f"{len(improving)} of {len(categories)} mistakes are clearly "
                      "improving",
             "detail": "The biggest: "
-                      + ", ".join(c["category"] for c in improving[:3]),
+                      + ", ".join(_name(c["category"], cards) for c in improving[:3]),
             "anchor": "patterns",
         })
     leaning = [c for c in categories
@@ -1407,21 +1422,24 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
             "kind": "leaning",
             "title": f"{len(leaning)} more are heading the right way",
             "detail": "Too early to be sure, but going down: "
-                      + ", ".join(c["category"] for c in leaning[:3]),
+                      + ", ".join(_name(c["category"], cards) for c in leaning[:3]),
             "anchor": "patterns",
         })
 
     # A form that holds up under test, on enough items to mean it. Not the same
     # claim as producing it unmonitored — that is what the third rung is for.
+    # Not the ones still turning up in speech: "right in drills, wrong when
+    # speaking" is the problem the action list leads with, not good news.
     known = [r for r in rows if r["drill"]
              and r["drill"]["attempted"] >= MIN_DRILL_ITEMS
-             and (r["drill"]["accuracy"] or 0) >= FORM_KNOWN_ACCURACY]
+             and (r["drill"]["accuracy"] or 0) >= FORM_KNOWN_ACCURACY
+             and r["state"] != "automaticity-gap"]
     if known:
         wins.append({
             "kind": "form-known",
             "title": f"{len(known)} rule{'' if len(known) == 1 else 's'} you get right in "
                      "drills",
-            "detail": ", ".join(f"{r['category']} "
+            "detail": ", ".join(f"{_name(r['category'], cards)} "
                                 f"({r['drill']['correct']}/{r['drill']['attempted']})"
                                 for r in known[:3]),
             "anchor": "patterns",
@@ -1436,8 +1454,9 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
             wins.append({
                 "kind": "asking",
                 "title": "Question practice is going better",
-                "detail": f"{last['met']} of {last['total']} goals met on {last['date']}, "
-                          f"up from {first['met']} of {first['total']} on {first['date']}",
+                "detail": f"{last['met']} of {last['total']} goals met on "
+                          f"{_nice_date(last['date'])}, up from {first['met']} of "
+                          f"{first['total']} on {_nice_date(first['date'])}",
                 "anchor": "asking",
             })
 
@@ -1469,7 +1488,7 @@ def _whats_working(ladder: dict, categories: list[dict], speech: dict,
                 "kind": "asking-pattern",
                 "title": f"{pattern['name']} is improving",
                 "detail": f"{pattern['sessions_with_error']} practice sessions with a mistake"
-                          + (f", last on {pattern['last_error']}"
+                          + (f", last on {_nice_date(pattern['last_error'])}"
                              if pattern["last_error"] and pattern["last_error"] != "\u2014"
                              else " on record"),
                 "anchor": "askpatterns",
@@ -1515,8 +1534,33 @@ def _fluency_slot(speech: dict, vocabulary: dict) -> Optional[dict]:
     return None
 
 
+def _nice_date(iso: str) -> str:
+    """ "2026-08-21" as "21 Aug" — the form the page's prose uses throughout."""
+    try:
+        day = date_type.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return iso
+    return f"{day.day} {day.strftime('%b')}"
+
+
+def _one_in(rate: Optional[float]) -> str:
+    """A per-1,000-words rate as "1 in every N words", rounded to a figure a
+    person would say. Per-minute would be more vivid, but pace is measured two
+    incomparable ways here, so words are the honest unit."""
+    if not rate:
+        return ""
+    every = 1000 / rate
+    step = 10 if every < 200 else 50
+    return f"1 in every {int(round(every / step) * step) or step:,} words"
+
+
 def _times(count: Optional[int]) -> str:
     return f"{count or 0} time{'' if count == 1 else 's'}"
+
+
+def _name(category: str, cards: dict[str, dict]) -> str:
+    note = (cards.get(category) or {}).get("note") or {}
+    return note.get("plain_name") or category
 
 
 def _plain_why(target: priority.Target, *, overdue_days: Optional[int],
@@ -1565,9 +1609,8 @@ def _plain_blocker(block: priority.Blocker, loop: practice.LoopState,
                   f"{loop.window_days} days. Recordings only measure your English; "
                   "practice is what improves it.")
         if unbridged:
-            detail += (" Choose conversation practice (\u201clet's practice\u201d): every "
-                       "session so far was question practice, which doesn't work on the "
-                       "grammar mistakes below.")
+            detail += (" Choose conversation practice: every session so far was question "
+                       "practice, which doesn't work on the grammar mistakes below.")
         return ("Do a conversation practice session" if unbridged
                 else "Do a practice session"), detail
     if block.kind == "overdue-dialogue":
@@ -1575,10 +1618,22 @@ def _plain_blocker(block: priority.Blocker, loop: practice.LoopState,
                       key=lambda row: row["next_due"])
         names = ", ".join(row["category"] for row in late[:3]) + (", \u2026" if len(late) > 3 else "")
         return (f"{len(late)} question skill{'' if len(late) == 1 else 's'} due for review",
-                f"Overdue since {late[0]['next_due']}: {names}. Say \u201clet's practice "
+                f"Overdue since {_nice_date(late[0]['next_due'])}: {names}. Say \u201clet's practice "
                 "asking\u201d to review them. Recordings can't measure these, so this "
                 "reminder is the only thing that keeps track of them.")
     return block.title, block.detail
+
+
+# What to say to Claude Code to start each kind of action — the page can name
+# the next step, but only this turns it into something to do.
+HOW_TO_START = {
+    "unanalysed": "analyze the recording",
+    "treatment-stopped": "let's practice",
+    "overdue-dialogue": "let's practice asking",
+    "automaticity-gap": "let's practice",
+    "form-unreliable": "let's practice",
+    "thin-evidence": "let's practice",
+}
 
 
 def _actions(targets: list, blocking: list[tuple[priority.Blocker, str, str]],
@@ -1598,6 +1653,7 @@ def _actions(targets: list, blocking: list[tuple[priority.Blocker, str, str]],
         "detail": detail,
         "anchor": block.anchor,
         "blocking": True,
+        "how": HOW_TO_START.get(block.kind, ""),
     } for block, title, detail in blocking]
 
     # Rule 17 reserves a slot for fluency or vocabulary, and a reserved slot that
@@ -1609,11 +1665,13 @@ def _actions(targets: list, blocking: list[tuple[priority.Blocker, str, str]],
         words = plain[target.category]
         actions.append({
             "kind": target.state,
-            "title": f"{words['action']}: {target.category}",
+            "title": f"{words['action']}: {words['name']}",
             "detail": words["why"] or words["state"] + ".",
             "anchor": "patterns",
             "slug": target.slug,
             "blocking": False,
+            "how": (f"write a drill for {target.category}" if target.state == "no-drill"
+                    else HOW_TO_START.get(target.state, "")),
         })
 
     if fluency_slot:
@@ -1623,6 +1681,7 @@ def _actions(targets: list, blocking: list[tuple[priority.Blocker, str, str]],
             "detail": fluency_slot["detail"],
             "anchor": fluency_slot["anchor"],
             "blocking": False,
+            "how": "",
         })
 
     return actions[:MAX_ACTIONS]
@@ -1671,7 +1730,9 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
                     if row.next_due and row.next_due < generated]
     loop_state = practice.loop_state(practice_sessions, dates, overdue_rows,
                                      today=generated)
-    loop = _loop(loop_state, dates)
+    loop = _loop(loop_state, dates, overdue_rows,
+                 {card["category"]: _name(card["category"], {c["category"]: c for c in categories})
+                  for card in categories})
 
     # The ranking, once, in the order `priority.py` defines — then narrowed to
     # rule 17's portfolio. Both the action list and the focus table read this,
@@ -1703,6 +1764,7 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
     drillable_first = next((t.category for t in targets
                             if t.state == "no-drill" and "thin" not in t.flags), None)
     plain = {t.category: {
+        "name": _name(t.category, cards_by_name),
         "state": PLAIN_STATES[t.state],
         "action": PLAIN_ACTIONS[t.state],
         "why": _plain_why(t, overdue_days=overdue.get(t.category),
@@ -1741,6 +1803,7 @@ def build_model(*, analysis_dir: Path, today: Optional[str] = None,
             "plain_action": plain[target.category]["action"],
             "plain_why": plain[target.category]["why"],
             "plain_tier": PLAIN_TIERS.get(target.tier, target.tier),
+            "plain_name": plain[target.category]["name"],
         } for target in slate],
         "blocking": [{"kind": b.kind, "title": b.title, "detail": b.detail,
                       "anchor": b.anchor} for b in blocking],
@@ -1775,26 +1838,22 @@ def _verdict(progress: dict, categories: list[dict], actions: list[dict]) -> lis
         lines.append({
             "tone": "good" if row["better"] else "bad",
             "text": f"{what} are {'down' if row['better'] else 'up'} {percent}% since you "
-                    f"started ({num_text(row['before'])} \u2192 {num_text(row['after'])} per "
-                    "1,000 words).",
+                    f"started: from {_one_in(row['before'])} to {_one_in(row['after'])}.",
         })
 
     worse = sorted((c for c in categories if c["direction"] == "worsening"),
                    key=lambda c: -c["impact"])
     if worse:
         worst = worse[0]
+        cards = {c["category"]: c for c in categories}
         lines.append({"tone": "bad", "text":
-                      f"{worst['category']} {'is' if len(worse) == 1 else 'are the biggest'} "
-                      "getting worse"
-                      + (f": {_times(worst['latest_count'])} in your last recording."
-                         if worst["latest_count"] else ".")})
+                      f"Getting worse: {_name(worst['category'], cards)}"
+                      + (f" ({_times(worst['latest_count'])} in your last recording)"
+                         if worst["latest_count"] else "")
+                      + (f", and {len(worse) - 1} more" if len(worse) > 1 else "") + "."})
     if actions:
         lines.append({"tone": "next", "text": f"Next: {actions[0]['title']}."})
     return lines
-
-
-def num_text(value: float) -> str:
-    return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
 # --- rendering ----------------------------------------------------------------

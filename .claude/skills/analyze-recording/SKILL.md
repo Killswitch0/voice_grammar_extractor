@@ -542,6 +542,12 @@ python -m voxlib.mistakes add --date YYYY-MM-DD --reliable-words <N> \
   `analysis/fluency_history.csv` (step 4). Don't recount it.
 - Category names must match the `## <Mistake Name>` headings in `memory.md`
   exactly (rule 13) — that string is the join key between the two files.
+- Every new `## <Mistake Name>` entry gets a `Plain name:` line straight under
+  the heading: the mistake in a few everyday words, written for the owner, not
+  a grammar term — "Say *a* / *the* before a singular noun", "Explain *it to*
+  you, not explain you". The dashboard shows it as the mistake's title, with
+  the grammar name small beneath it, so a missing one falls back to the
+  grammar name. Never change the heading itself; that is the join key.
 - Severity is the same rating used in the session report's mistake table —
   the listener-consequence scale in rule 16. The code ranks by the *most
   recent* severity on record for a category, so a re-rating takes effect
@@ -697,6 +703,7 @@ Main bottlenecks:
 
 ## <Mistake Name>
 
+Plain name: <the mistake in a few everyday words, e.g. "Explain *it to* you, not explain you">
 Status: Active / Improving
 Occurrences:
 First seen:

@@ -30,13 +30,14 @@ TEMPLATE = """<!DOCTYPE html>
     --surface: #fcfcfb;
     --ink: #0b0b0b;
     --ink-2: #52514e;
-    --muted: #898781;
+    --muted: #6f6d68;
     --grid: #e1e0d9;
     --axis: #c3c2b7;
     --border: rgba(11,11,11,0.10);
     --series-1: #2a78d6;
+    --link: #1f63b8;
     --series-2: #eb6834;
-    --good: #0ca30c;
+    --good: #0b7d0b;
     --warning: #fab219;
     --critical: #d03b3b;
     --heat-0: rgba(42,120,214,0.07);
@@ -66,6 +67,7 @@ TEMPLATE = """<!DOCTYPE html>
       --axis: #383835;
       --border: rgba(255,255,255,0.10);
       --series-1: #3987e5;
+      --link: #3987e5;
       --series-2: #d95926;
       --heat-0: rgba(57,135,229,0.10);
       --heat-1: #184f95;
@@ -92,6 +94,7 @@ TEMPLATE = """<!DOCTYPE html>
     --axis: #383835;
     --border: rgba(255,255,255,0.10);
     --series-1: #3987e5;
+    --link: #3987e5;
     --series-2: #d95926;
     --heat-0: rgba(57,135,229,0.10);
     --heat-1: #184f95;
@@ -152,13 +155,13 @@ TEMPLATE = """<!DOCTYPE html>
               padding-top: 1px; }
   .action-title { font-size: 13.5px; font-weight: 600; line-height: 1.4; }
   .action-detail { font-size: 12px; color: var(--ink-2); margin-top: 3px; line-height: 1.5; }
-  .action-link { font-size: 11px; color: var(--series-1); text-decoration: none;
+  .action-link { font-size: 11px; color: var(--link); text-decoration: none;
                  margin-top: 5px; display: inline-block; }
   .action-link:hover { text-decoration: underline; }
 
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-          padding: 20px; margin-top: 16px; }
-  .card > h2 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+          padding: 20px 22px; margin-top: 14px; }
+  .card h2 { font-size: 18px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
   .card > .sub { margin-bottom: 18px; max-width: 72ch; }
   .card-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start;
                justify-content: space-between; margin-bottom: 14px; }
@@ -189,10 +192,7 @@ TEMPLATE = """<!DOCTYPE html>
   .note { color: var(--muted); font-size: 12px; margin-top: 14px; max-width: 78ch; }
 
   /* Quality strip */
-  .strip-wrap { padding: 0 58px 0 40px; }    /* the line chart's own left/right margins */
-  .strip { display: flex; gap: 2px; margin-top: 4px; align-items: flex-end; height: 17px; }
-  @media (max-width: 560px) { .strip-wrap { padding: 0; } }
-  .strip-cell { flex: 1; height: 6px; border-radius: 2px; background: var(--quality); }
+  .key-tick { width: 0; flex: none; display: inline-block; }
 
   /* Heatmap */
   .heat-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
@@ -259,7 +259,7 @@ TEMPLATE = """<!DOCTYPE html>
   summary:hover { color: var(--ink); }
   /* Folded-away reasoning: present for anyone who asks, quiet for everyone else. */
   details.how { border-top: none; padding-top: 0; margin-top: 6px; }
-  details.how summary { font-size: 11.5px; color: var(--muted); }
+  details.how summary { font-size: 11.5px; color: var(--muted); font-weight: 400; }
   details.how .note { max-width: 76ch; }
 
   /* An open card takes the whole grid row: at a third of the width its notes
@@ -368,7 +368,11 @@ TEMPLATE = """<!DOCTYPE html>
   button.state[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); }
   .count { font-variant-numeric: tabular-nums; font-weight: 600; }
   td.rung, th.rung, td.where, th.where { text-align: left; }
-  td.where, th.where { white-space: normal; min-width: 200px; }
+  td.where, th.where { white-space: normal; min-width: 180px; }
+  /* A left-aligned column after a right-aligned one puts the two texts back to
+     back across a single gutter; widen it there, and only there. */
+  :is(th, td):not(.rung, .where, :first-child) + :is(th, td):is(.rung, .where) {
+    padding-left: 24px; }
   tbody th[scope="row"] { white-space: normal; min-width: 190px; }
   #ladder td, #ladder th { padding: 7px 8px; vertical-align: top; }
   .cellrow { display: flex; gap: 7px; align-items: baseline; }
@@ -380,9 +384,10 @@ TEMPLATE = """<!DOCTYPE html>
   table { border-collapse: collapse; width: 100%; font-size: 12px;
           font-variant-numeric: tabular-nums; }
   caption { text-align: left; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
-  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid);
+  th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--grid);
            white-space: nowrap; }
-  th:first-child, td:first-child { text-align: left; }
+  th:first-child, td:first-child { text-align: left; padding-left: 8px; }
+  th:last-child, td:last-child { padding-right: 8px; }
   thead th { color: var(--muted); font-weight: 500; }
   .table-wrap { overflow-x: auto; }
   [hidden] { display: none !important; }
@@ -414,14 +419,14 @@ TEMPLATE = """<!DOCTYPE html>
                max-width: 84ch; border-top: 1px solid var(--border); padding-top: 12px; }
 
   /* Where you are */
-  .where { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; }
+  .overview { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; }
   .where-level { flex: 1 1 280px; }
   .where-metric { flex: 1 1 300px; }
   /* Before the level is established the measurement leads and the level
      follows, so the first thing read is a number rather than its absence. */
-  .where[data-established="false"] { flex-direction: row-reverse;
+  .overview[data-established="false"] { flex-direction: row-reverse;
                                      justify-content: flex-end; }
-  .where[data-established="false"] > .where-level { flex: 0 1 280px; }
+  .overview[data-established="false"] > .where-level { flex: 0 1 280px; }
   .where-val { font-size: 40px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
   .where-sub { color: var(--ink-2); font-size: 13px; margin-top: 8px; }
   .gap-head { font-size: 12px; font-weight: 600; margin-top: 18px; }
@@ -434,6 +439,17 @@ TEMPLATE = """<!DOCTYPE html>
   .gap-note { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
   .where-num { font-size: 32px; font-weight: 600; line-height: 1.1; margin-top: 2px; }
   .where-move { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+
+  /* How to start */
+  .how-start { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+               margin-top: 10px; font-size: 12.5px; }
+  .how-label { color: var(--ink-2); }
+  .how-phrase { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+                background: var(--heat-0); border: 1px solid var(--border);
+                border-radius: 6px; padding: 2px 8px; }
+  button.copy { font-size: 11.5px; padding: 2px 10px; min-height: 26px; }
+  .where-scale { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .cmp-words { font-size: 11px; color: var(--muted); margin-top: 2px; text-align: right; }
 
   /* Summary */
   .verdict { list-style: none; margin: 0 0 26px; padding: 0; display: grid; gap: 8px; }
@@ -479,6 +495,8 @@ TEMPLATE = """<!DOCTYPE html>
   .slate-name:hover { color: var(--series-1); }
   .slate-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
   .slate-state { font-size: 12.5px; margin-top: 4px; }
+  .grammar-name { font-size: 11px; color: var(--muted); margin-top: 1px; font-weight: 400; }
+  .pname .tier { margin-left: 6px; font-weight: 400; }
   .slate-main .ex { margin-top: 6px; }
   .tier { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border);
           border-radius: 999px; padding: 0 7px; }
@@ -532,7 +550,7 @@ TEMPLATE = """<!DOCTYPE html>
     body { padding: 0 16px 48px; }
     header { padding: 20px 0 4px; }
     .card { padding: 16px; border-radius: 10px; }
-    .where { gap: 22px; }
+    .overview { gap: 22px; }
     .where-val { font-size: 34px; }
     .where-num { font-size: 27px; }
     .lead-title { font-size: 15.5px; }
@@ -671,6 +689,34 @@ const MODE_WORDS = {
 const modeText = (mode) => MODE_WORDS[mode] || mode || "—";
 
 /* ---------- helpers ---------- */
+// The owner's name for a mistake (memory.md's `Plain name:`), falling back to
+// the grammar name, which stays the key everything else is joined on.
+const plainName = (cat) => (cat && cat.note && cat.note.plain_name) || (cat && cat.category) || "";
+// "How to start": the words to say to Claude Code, with a button that copies
+// them. The clipboard can be refused (an old browser, a denied permission), and
+// then the phrase is selected instead so a plain Cmd-C still works.
+function howToStart(phrase) {
+  if (!phrase) return null;
+  const said = el("code", { class: "how-phrase", text: phrase });
+  const copy = el("button", { class: "ghost copy", type: "button", text: "Copy" });
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(phrase);
+      copy.textContent = "Copied";
+    } catch (e) {
+      const range = document.createRange();
+      range.selectNodeContents(said);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      copy.textContent = "Press ⌘C";
+    }
+    setTimeout(() => { copy.textContent = "Copy"; }, 1600);
+  });
+  return el("div", { class: "how-start" }, [
+    el("span", { class: "how-label", text: "To start, say to Claude Code:" }), said, copy,
+  ]);
+}
 // The reasoning behind a section, kept but folded away: the first thing a
 // section says should be what it shows, not the case for how it was counted.
 function how(text, label = "How is this measured?") {
@@ -684,7 +730,19 @@ const num = (v, d = 2) => v === null || v === undefined ? "\\u2014" : v.toFixed(
 const trim = (v) => v === null || v === undefined ? "\\u2014"
   : String(parseFloat(v.toFixed(3)));
 const int = (v) => v === null || v === undefined ? "\\u2014" : v.toLocaleString("en-US");
-const shortDate = (d) => d.slice(5).replace("-", "/");
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+                "Nov", "Dec"];
+// "2026-08-03" as "3 Aug", the form every date in the page's prose takes.
+const niceDate = (d) => d ? `${+d.slice(8, 10)} ${MONTHS[+d.slice(5, 7) - 1]}` : "";
+const shortDate = niceDate;
+// A per-1,000-words rate as "1 in every N words" — the same rounding as
+// dashboard._one_in, which writes the summary sentences.
+const oneIn = (rate) => {
+  if (!rate) return "";
+  const every = 1000 / rate;
+  const step = every < 200 ? 10 : 50;
+  return `1 in every ${(Math.round(every / step) * step || step).toLocaleString("en-US")} words`;
+};
 // Narrow enough for a season of column headers side by side: "8/3", not "08/03".
 const tinyDate = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 
@@ -780,17 +838,28 @@ function ticks(max, count = 5) {
 // plot; a sparkline in a narrow table column needs a much lower one, and without
 // it the drawing is wider than the cell holding it and lands on the text next
 // door.
+// Every chart on the page, so a theme change can redraw them: they read their
+// colours when drawn, and a width that did not change never redraws on its own.
+const REDRAW = new Set();
+
 function responsive(host, draw, min = 240) {
   let width = 0;
-  const run = () => {
+  const run = (force = false) => {
     const w = Math.max(min, Math.floor(host.clientWidth));
-    if (w === width) return;
+    if (w === width && !force) return;
     width = w;
     host.textContent = "";
     host.append(draw(w));
   };
   run();
-  new ResizeObserver(run).observe(host);
+  REDRAW.add(() => run(true));
+  // Deferred a frame: drawing inside the observer's own callback resizes what it
+  // observes and makes the browser report an undelivered-notifications loop.
+  let pending = 0;
+  new ResizeObserver(() => {
+    cancelAnimationFrame(pending);
+    pending = requestAnimationFrame(() => run());
+  }).observe(host);
 }
 </script>
 <script>
@@ -824,7 +893,7 @@ function lineChart(width, sessions, series, opts = {}) {
   const events = opts.events || [];
   const gutter = events.length ? 26 : 0;
   const H = Math.max(210, Math.min(300, Math.round(width * 0.42))) + gutter;
-  const M = { top: 14, right: 58, bottom: 30 + gutter, left: 40 };
+  const M = { top: opts.yLabel ? 26 : 14, right: 58, bottom: 30 + gutter, left: 40 };
   const iw = width - M.left - M.right;
   const ih = H - M.top - M.bottom;
   const values = series.flatMap((s) => sessions.map((d) => d[s.key])).filter((v) => v !== null);
@@ -835,6 +904,8 @@ function lineChart(width, sessions, series, opts = {}) {
 
   const root = svg("svg", { viewBox: `0 0 ${width} ${H}`, width, height: H,
                             role: "img" });
+  if (opts.yLabel) root.append(Object.assign(svg("text", { x: M.left, y: M.top - 4,
+    fill: css("--muted"), "font-size": 11 }), { textContent: opts.yLabel }));
 
   for (const t of scale) {                                      // hairline, solid, recessive
     root.append(svg("line", { x1: M.left, x2: M.left + iw, y1: y(t), y2: y(t),
@@ -875,8 +946,9 @@ function lineChart(width, sessions, series, opts = {}) {
       if (run.length > 1)
         root.append(svg("path", { d: "M" + run.map((p) => `${p[0]},${p[1]}`).join("L"),
                                   fill: "none", stroke: color,
-                                  "stroke-width": s.faded ? 1 : (s.dashed ? 1.5 : 2),
-                                  "stroke-opacity": s.faded ? 0.22 : 1,
+                                  "stroke-width": s.faded ? 1
+                                    : s.bold ? 3 : s.muted ? 1.5 : (s.dashed ? 1.5 : 2),
+                                  "stroke-opacity": s.faded ? 0.22 : s.muted ? 0.6 : 1,
                                   "stroke-dasharray": s.dashed ? "4 3" : "",
                                   "stroke-linejoin": "round", "stroke-linecap": "round" }));
       else if (run.length === 1)
@@ -1005,7 +1077,7 @@ function heatGrid(model) {
   const cells = [];
   for (const cat of model.categories) {
     const label = el("div", { class: "heat-label", title: cat.category }, [
-      el("span", { class: "nm", text: cat.category }),
+      el("span", { class: "nm", text: plainName(cat) }),
     ]);
     grid.append(label);
     const row = [];
@@ -1087,7 +1159,7 @@ function heatTable(model) {
   table.append(el("thead", {}, [head]));
   const body = el("tbody");
   for (const cat of model.categories) {
-    const tr = el("tr", {}, [el("th", { scope: "row", text: cat.category })]);
+    const tr = el("tr", {}, [el("th", { scope: "row", text: plainName(cat) })]);
     for (const p of cat.series)
       tr.append(el("td", { text: p.state === "seen" ? num(p.rate)
                                  : p.state === "clean" ? "0" : "\\u2014" }));
@@ -1173,7 +1245,7 @@ function example(ex) {
   right.append(inlineMarkdown(ex.right));       // corrections carry **emphasis**
   row.append(right);
   if (ex.date) row.append(el("span", { class: "when",
-    text: ex.source ? `${ex.date} \\u00b7 ${ex.source}` : ex.date }));
+    text: ex.source ? `${niceDate(ex.date)} \\u00b7 ${ex.source}` : niceDate(ex.date) }));
   return row;
 }
 
@@ -1249,18 +1321,25 @@ function patternDetail(cat) {
     stat("Recent average", `${num(cat.weighted_rate)} per 1,000 words`),
     stat("Came up in", `${cat.sessions_measured} of `
       + `${cat.series.filter((p) => p.state !== "before").length} recordings`),
-    stat("First seen", cat.first_seen),
-    stat("Last seen", cat.last_seen || "never"),
+    stat("First seen", niceDate(cat.first_seen)),
+    stat("Last seen", cat.last_seen ? niceDate(cat.last_seen) : "never"),
   ]);
   if (cat.drill) {
-    stats.append(stat("Drills done", `${cat.drill.attempts}, last ${cat.drill.last_date}`));
+    stats.append(stat("Drills done", `${cat.drill.attempts}, last ${niceDate(cat.drill.last_date)}`));
     stats.append(stat("Right in drills", cat.drill.accuracy === null ? "\u2014"
       : `${Math.round(cat.drill.accuracy * 100)}% `
         + `(${cat.drill.correct}/${cat.drill.attempted})`));
   }
   body.append(stats);
 
-  if (cat.note) body.append(noteBlock(cat.note));
+  if (cat.note && cat.note.examples.length) {
+    body.prepend(el("div", { class: "ex-list", style: "margin-bottom:14px" },
+                    cat.note.examples.slice().reverse().map(example)));
+  }
+  if (cat.note) body.append(el("details", { class: "how" }, [
+    el("summary", { text: "Coach's notes" }),
+    noteBlock({ ...cat.note, examples: [] }),
+  ]));
   body.append(el("a", { class: "permalink", href: `#${cat.slug}`,
                         text: "\u00b6 link to this mistake" }));
   return body;
@@ -1270,8 +1349,8 @@ function patternDetail(cat) {
 /* ---------- page ---------- */
 const H = MODEL.headline;
 document.getElementById("meta").textContent =
-  `${H.sessions} sessions \\u00b7 ${H.first_date} \\u2192 ${H.last_date} `
-  + `\\u00b7 built ${MODEL.generated_full}`;
+  `${H.sessions} recordings \\u00b7 ${niceDate(H.first_date)} \\u2192 ${niceDate(H.last_date)} `
+  + `\\u00b7 updated ${niceDate(MODEL.generated_full.slice(0, 10))} ${MODEL.generated_full.slice(11)}`;
 
 /* the routine — is the part that improves anything actually happening? */
 (() => {
@@ -1307,7 +1386,11 @@ document.getElementById("meta").textContent =
         el("span", { class: "loop-state", text: WORDS[side.state] }),
       ]),
       el("div", { class: "loop-when", text: when }),
-      el("div", { class: "loop-detail", text: side.detail }),
+      el("div", { class: "loop-detail", text: side.detail
+        // Reviews are what a practice session opens with, so a stale review
+        // side is the same fix as a stale practice side, not a second problem.
+        + (side.key === "review" && side.state !== "ok"
+           ? " · your next practice session works through these" : "") }),
     ]));
   }
   host.append(strip);
@@ -1341,25 +1424,19 @@ document.getElementById("meta").textContent =
       ]);
     })));
 
-  // How the serious-mistake rate has moved over the last few recordings,
-  // counted rather than described: "up in 3 of the last 5" is a fact, "rising"
-  // is a reading of one.
-  const recent = MODEL.sessions.slice(-6).map((s) => s.clarity_rate).filter((v) => v !== null);
+  // Against the average of the recordings just before it. Counting ups and
+  // downs over the last five contradicted the summary line above it on a
+  // history where both were true; one comparison, with its baseline named,
+  // does not.
+  const prev = MODEL.sessions.slice(-4, -1).map((s) => s.clarity_rate)
+    .filter((v) => v !== null);
+  const prevMean = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : null;
   let clarityNote = "";
   let clarityWorse = null;
-  if (recent.length >= 3) {
-    // Counted in both directions rather than one subtracted from the other: a
-    // session that did not move the rate is neither.
-    let up = 0, down = 0;
-    for (let i = 1; i < recent.length; i += 1) {
-      if (recent[i] > recent[i - 1]) up += 1;
-      else if (recent[i] < recent[i - 1]) down += 1;
-    }
-    clarityWorse = up > down;
-    const moved = clarityWorse ? up : down;
-    const steps = recent.length - 1;
-    clarityNote = `${clarityWorse ? "▲ went up" : "▼ went down"} in ${moved} of the last `
-      + `${steps} recording${steps === 1 ? "" : "s"}`;
+  if (clarity !== null && prevMean !== null && prev.length >= 2) {
+    clarityWorse = clarity > prevMean;
+    clarityNote = `${clarityWorse ? "▲ higher" : "▼ lower"} than your previous `
+      + `${prev.length} recordings (average ${num(prevMean)})`;
   }
 
   // The rung is deliberately slow — three qualifying sessions — so on its own
@@ -1406,14 +1483,15 @@ document.getElementById("meta").textContent =
     }
   }
 
-  host.append(el("div", { class: "where", "data-established": String(established) }, [
+  host.append(el("div", { class: "overview", "data-established": String(established) }, [
     levelSide,
     el("div", { class: "where-metric" }, [
       el("div", { class: "tile-label", text: "Serious mistakes, last recording" }),
       el("div", { class: "where-num", text: num(clarity) }),
+      el("div", { class: "where-scale", text: clarity ? `per 1,000 words — about ${oneIn(clarity)}`
+        : "per 1,000 words" }),
       el("div", { class: "tile-note", text:
-        "per 1,000 words · lower is better. These are the ones where a listener can lose "
-        + "your meaning." }),
+        "Lower is better. These are the ones where a listener can lose your meaning." }),
       clarityNote ? el("div", { class: "where-move",
         style: clarityWorse === null ? "" : `color: var(${clarityWorse ? "--critical" : "--good"})`,
         text: clarityNote }) : null,
@@ -1436,6 +1514,7 @@ document.getElementById("meta").textContent =
     el("div", { class: "lead-eyebrow", text: first.blocking ? "Do this first" : "Most important" }),
     el("div", { class: "lead-title", text: first.title }),
     el("div", { class: "lead-detail", text: first.detail }),
+    howToStart(first.how),
     el("a", { class: "action-link", href: `#${first.anchor}`,
               text: `↓ ${SECTION_LABELS[first.anchor] || first.anchor}` }),
   ]));
@@ -1451,6 +1530,7 @@ document.getElementById("meta").textContent =
       el("div", {}, [
         el("div", { class: "action-title", text: action.title }),
         el("div", { class: "action-detail", text: action.detail }),
+        howToStart(action.how),
         el("a", { class: "action-link", href: `#${action.anchor}`,
                   text: `↓ ${SECTION_LABELS[action.anchor] || action.anchor}` }),
       ]),
@@ -1509,15 +1589,15 @@ document.getElementById("meta").textContent =
   // clarity tier is the part that costs the listener the meaning, and it is
   // what decides whether the speaker is getting easier to understand.
   const series = [
-    { key: "clarity_rate", token: "--series-2",
+    { key: "clarity_rate", token: "--series-2", bold: true,
       label: "Serious mistakes (a listener can lose your meaning)" },
-    { key: "polish_rate", token: "--series-1",
+    { key: "polish_rate", token: "--series-1", muted: true,
       label: "Minor mistakes (understood, but not natural-sounding)" },
     // Promoted out of the table view, where it was a column of numbers nobody
     // opened. It is the one series on this page that is comparable end to end:
     // the others grow as coaching finds categories, this one counts the same
     // five at both ends.
-    { key: "cohort_rate", token: "--hollow", dashed: true,
+    { key: "cohort_rate", token: "--hollow", dashed: true, muted: true,
       label: "Same checklist as day one (the fair comparison)" },
   ];
   const words = MODEL.sessions.map((s) => s.reliable_words).filter(Boolean);
@@ -1529,11 +1609,9 @@ document.getElementById("meta").textContent =
     el("div", {}, [
       el("h2", { text: "Am I improving?" }),
       el("div", { class: "sub", text:
-        "Mistakes per 1,000 words in each recording. Lower is better. Watch the orange "
-        + "line most: those are the mistakes that cost you the most. The dashed grey line "
-        + "only counts the mistakes tracked since your first recording, so it's the "
-        + "honest before-and-after. The marks under the chart are drills and practice "
-        + "sessions." }),
+        "Mistakes per 1,000 words in each recording. Lower is better. The bold orange line "
+        + "is the one that matters most. The dashed grey line only counts the mistakes "
+        + "tracked since your first recording, so it's the honest before-and-after." }),
     ]),
     toggle,
   ]));
@@ -1541,47 +1619,21 @@ document.getElementById("meta").textContent =
   host.append(chartSide);
   chartSide.append(el("div", { class: "legend" }, series.map((s) =>
     el("div", { class: "legend-item" }, [
-      el("span", { class: "key-line", style: `background: var(${s.token})` }),
+      el("span", { class: "key-line", style: `background: var(${s.token});height:${s.bold ? 3 : 2}px;opacity:${s.muted ? 0.6 : 1}` }),
       el("span", { text: s.label }),
     ]))));
   chartSide.append(plot);
-  chartSide.append(el("div", {}, [
-    el("div", { class: "legend", style: "margin:12px 0 2px" }, [
-      el("div", { class: "legend-item" }, [
-        el("span", { class: "key-box", style: "background: var(--quality)" }),
-        el("span", { text: "how much of each recording the transcriber wasn't sure of (taller = less reliable)" }),
-      ]),
+  // What the marks under the axis are, said once rather than only on hover.
+  if ((MODEL.treatment || []).length) chartSide.append(el("div", { class: "legend",
+    style: "margin:10px 0 2px" }, [
+    el("div", { class: "legend-item" }, [
+      el("span", { class: "key-tick", style: "height:12px;border-left:2px solid var(--ink-2)" }),
+      el("span", { text: "practice with corrections" }),
     ]),
-    (() => {
-      const strip = el("div", { class: "strip" });
-      const quality = new Map(MODEL.speech.sessions.map((q) => [q.date, q]));
-      for (const s of MODEL.sessions) {
-        // The WORD share, not the line share: a two-word "Yeah." weighs as much
-        // as a full sentence by line, and that is where whisper is least sure.
-        // fluency.warn_if_unreliable fires on this one for the same reason.
-        const q = quality.get(s.date);
-        const share = q ? q.word_share : null;
-        const cell = el("div", { class: "strip-cell", tabindex: 0,
-          style: `height:${share === null ? 2 : 3 + Math.round(share * 34)}px` });
-        const rows = [
-          { value: share === null ? "\\u2014" : `${Math.round(share * 100)}%`,
-            name: "of words were low-confidence" },
-          { value: q && q.line_share !== null ? `${Math.round(q.line_share * 100)}%` : "\\u2014",
-            name: "of lines \\u2014 the weaker reading" },
-          { value: int(s.reliable_words), name: "reliable words" },
-          { value: modeText(s.mode), name: "recording type" },
-        ];
-        const show = (ev) => showTip(ev.clientX ?? 0, ev.clientY ?? 0, s.date, rows);
-        cell.addEventListener("pointermove", show);
-        cell.addEventListener("focus", () => {
-          const b = cell.getBoundingClientRect(); showTip(b.right, b.top, s.date, rows);
-        });
-        cell.addEventListener("pointerleave", hideTip);
-        cell.addEventListener("blur", hideTip);
-        strip.append(cell);
-      }
-      return el("div", { class: "strip-wrap" }, [strip]);
-    })(),
+    el("div", { class: "legend-item" }, [
+      el("span", { class: "key-tick", style: "height:7px;border-left:1px solid var(--axis)" }),
+      el("span", { text: "drill only" }),
+    ]),
   ]));
   if (MODEL.sessions.length > SMOOTH_ABOVE) chartSide.append(el("div", { class: "note", text:
     `The bold lines are an average of ${SMOOTH_WINDOW} recordings at a time; the faint `
@@ -1617,6 +1669,7 @@ document.getElementById("meta").textContent =
 
   responsive(plot, (w) => lineChart(w, MODEL.sessions, series, {
     events: MODEL.treatment || [],
+    yLabel: "per 1,000 words",
     extraRows: (d) => [
       { value: num(d.rate), name: "serious and minor together" },
       { value: `${d.clarity_count} + ${d.polish_count}`, name: "mistakes, serious + minor" },
@@ -1669,7 +1722,9 @@ document.getElementById("meta").textContent =
   }
 
   const rows = el("div", { class: "cmp" });
-  for (const s of P.series) {
+  // "Everything tracked" is not a fair comparison, so the Now view leaves it out;
+  // the chart's table view still has it.
+  for (const s of P.series.filter((row) => row.key !== "rate")) {
     const known = s.change !== null;
     rows.append(el("div", { class: "cmp-row", "data-key": s.key }, [
       el("div", {}, [
@@ -1680,6 +1735,7 @@ document.getElementById("meta").textContent =
         el("span", { class: "cmp-from", text: num(s.before) }),
         el("span", { class: "cmp-arrow", text: "→" }),
         el("span", { class: "cmp-to", text: num(s.after) }),
+        s.after ? el("div", { class: "cmp-words", text: `now ${oneIn(s.after)}` }) : null,
       ]),
       el("div", { class: "cmp-verdict",
         style: known ? `color: var(${s.better ? "--good" : "--critical"})` : "" },
@@ -1691,8 +1747,9 @@ document.getElementById("meta").textContent =
   host.append(el("div", { class: "cmp-wrap" }, [
     el("h3", { class: "sub-h", text: "Then vs now" }),
     el("div", { class: "sub", text:
-      `Your first ${P.window} recordings (from ${P.from_date}) against your last ${P.window} `
-      + `(to ${P.to_date}), ${P.days} days apart. Mistakes per 1,000 words, so lower is better.` }),
+      `Your first ${P.window} recordings (from ${niceDate(P.from_date)}) against your last `
+      + `${P.window} (to ${niceDate(P.to_date)}), ${P.days} days apart. Mistakes per 1,000 `
+      + "words, so lower is better." }),
     rows,
     el("div", { class: "note", text:
       "Your level over the same time: " + (P.level_moved
@@ -1743,9 +1800,11 @@ document.getElementById("meta").textContent =
     list.append(el("div", { class: "slate-row" }, [
       el("div", { class: "slate-main" }, [
         el("div", { class: "slate-title" }, [
-          el("a", { class: "slate-name", href: `#${target.slug}`, text: target.category }),
+          el("a", { class: "slate-name", href: `#${target.slug}`, text: target.plain_name }),
           el("span", { class: `tier tier-${target.tier}`, text: target.plain_tier }),
         ]),
+        target.plain_name !== target.category
+          ? el("div", { class: "grammar-name", text: target.category }) : null,
         el("div", { class: "slate-state", text: target.plain_state }),
         latest ? example({ wrong: latest.wrong, right: latest.right }) : null,
         target.plain_why ? el("div", { class: "slate-why", text: target.plain_why }) : null,
@@ -2511,9 +2570,11 @@ function smallLine(width, points, decimals) {
     toggle.append(el("span", { class: "caret", text: open ? "▼" : "▶" }));
     const name = el("div", {}, [
       el("div", { class: "pname" }, [
-        el("span", { text: r.category }),
+        el("span", { text: plainName(cat) || r.category }),
         el("span", { class: `tier tier-${r.tier}`, text: TIER[r.tier] || r.tier }),
       ]),
+      cat && plainName(cat) !== r.category
+        ? el("div", { class: "grammar-name", text: r.category }) : null,
     ]);
     // The most recent worked example stays visible without opening anything —
     // it is the one line on this page you can practise from.
@@ -2533,7 +2594,7 @@ function smallLine(width, points, decimals) {
 
     const due = r.next_due
       ? el("span", { class: r.overdue ? "overdue" : null,
-                     text: r.overdue ? `${r.next_due} · overdue` : r.next_due })
+                     text: r.overdue ? `${niceDate(r.next_due)} · overdue` : niceDate(r.next_due) })
       : el("span", { class: "detail", text: "not scheduled" });
 
     const tr = el("tr", { id: r.slug }, [
@@ -2586,7 +2647,8 @@ function smallLine(width, points, decimals) {
       severity: (a, b) => b.severity - a.severity || b.impact - a.impact,
       recent: (a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""),
       due: (a, b) => (a.next_due || "9999").localeCompare(b.next_due || "9999"),
-      name: (a, b) => a.category.localeCompare(b.category),
+      name: (a, b) => plainName(byCategory.get(a.category) || a)
+        .localeCompare(plainName(byCategory.get(b.category) || b)),
     };
     rows = [...rows].sort(rank[sort.value]);
 
@@ -2649,13 +2711,10 @@ function smallLine(width, points, decimals) {
     return true;
   };
 
+  // Nothing opens by itself: an opened row carries the coach's notes, and one
+  // left open pushed the rest of the table several screens down.
   build();
-  if (!openFromHash()) {
-    // Otherwise open the top-ranked row, so the page always shows one pattern's
-    // examples and notes without a click.
-    expanded.add(L.rows[0].slug);
-    build();
-  }
+  openFromHash();
   window.addEventListener("hashchange", openFromHash);
 
   if (L.dialogue_only.length) {
@@ -2995,6 +3054,7 @@ function levelChart(width, L) {
     + "counting words, so their accuracy is used on this page. For the rest it isn't "
     + "reliable yet, and mistakes per 1,000 words is used instead." }));
 
+  const cardOf = new Map(MODEL.categories.map((c) => [c.category, c]));
   const table = el("table");
   table.append(el("thead", {}, [el("tr", {}, [
     el("th", { text: "Mistake" }), el("th", { text: "Chances" }),
@@ -3005,7 +3065,9 @@ function levelChart(width, L) {
   for (const row of C.rows) {
     body.append(el("tr", {}, [
       el("th", { scope: "row" }, [
-        el("div", { text: row.category }),
+        el("div", { text: plainName(cardOf.get(row.category)) || row.category }),
+        cardOf.get(row.category) && plainName(cardOf.get(row.category)) !== row.category
+          ? el("div", { class: "grammar-name", text: row.category }) : null,
         // What counts as a chance is written for whoever maintains the frame;
         // it is there for anyone who asks, not in the way of the numbers.
         row.note ? el("details", { class: "how" }, [
@@ -3108,20 +3170,13 @@ function levelChart(width, L) {
 // themselves from a container that is zero-width while hidden.
 (() => {
   const host = document.getElementById("nav");
-  const gaps = (MODEL.ladder.states || {})["automaticity-gap"] || 0;
   const criteria = MODEL.asking.totals;
-  const chances = MODEL.opportunity || {};
+  // Only badges that mean something without explanation: bare counts beside a
+  // section name ("Do this next 5") read as unread notifications.
   const badges = {
-    actions: String(MODEL.actions.length),
-    focus: String((MODEL.slate || []).length),
-    working: String(MODEL.working.length),
     level: (MODEL.level.current || {}).label || "",
-    heatmap: `${MODEL.categories.length}`,
-    patterns: gaps ? `${gaps} gaps` : `${MODEL.categories.length}`,
-    chances: chances.frames ? `${(chances.adopted || []).length}/${chances.rows.length}` : "",
-    asking: criteria.total ? `${Math.round((criteria.met / criteria.total) * 100)}%` : "",
+    asking: criteria.total ? `${Math.round((criteria.met / criteria.total) * 100)}% goals met` : "",
     quality: MODEL.speech.any_unreliable ? "check" : "",
-    timeline: `${MODEL.timeline.length}`,
   };
 
   const panels = { now: document.getElementById("now"),
@@ -3228,7 +3283,7 @@ document.getElementById("theme").addEventListener("click", () => {
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   const current = document.documentElement.dataset.theme || (dark ? "dark" : "light");
   document.documentElement.dataset.theme = current === "dark" ? "light" : "dark";
-  window.dispatchEvent(new Event("resize"));
+  for (const redraw of REDRAW) redraw();
 });
 </script>
 </body>
